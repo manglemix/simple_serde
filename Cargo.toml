@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 toml = { version = "0.5.9" , optional = true}
 json = { version = "0.12.4" , optional = true}
+#serde = "1.0.138"
 
 [features]
 bin = []

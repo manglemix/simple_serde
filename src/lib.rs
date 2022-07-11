@@ -3,7 +3,8 @@ extern crate json as extern_json;
 #[cfg(feature = "toml")]
 extern crate toml as extern_toml;
 
-use std::mem::MaybeUninit;
+use std::borrow::Borrow;
+use std::fmt::{Debug, Formatter};
 use std::string::FromUtf8Error;
 
 #[cfg(feature = "json")]
@@ -11,17 +12,19 @@ use extern_json::Error as JSONError;
 #[cfg(feature = "toml")]
 use extern_toml::de::Error as TOMLError;
 
-use map::SerdeMapItem;
-use crate::array::{ArrayAccess, ArrayDataContainer};
-
-use crate::map::{MapAccess, MapDataContainer};
-
 #[cfg(feature = "toml")]
 pub mod toml;
-pub mod map;
-pub mod array;
 #[cfg(feature = "bin")]
-mod bin;
+pub mod bin;
+// #[cfg(feature = "json")]
+// pub mod json;
+
+#[derive(Debug, Copy, Clone)]
+pub enum SizeType {
+	U8,
+	U16,
+	U32
+}
 
 /// An error that can occur when trying to deserialize data
 #[derive(Debug)]
@@ -51,6 +54,7 @@ pub enum DeserializationErrorKind {
 	#[cfg(feature = "json")]
 	/// An error occurred while parsing JSON formatted data
 	JSONError(JSONError),
+	Nested(Box<DeserializationError>)
 }
 
 
@@ -60,6 +64,12 @@ impl From<TOMLError> for DeserializationErrorKind {
 		Self::TOMLError(e)
 	}
 }
+#[cfg(feature = "json")]
+impl From<JSONError> for DeserializationErrorKind {
+	fn from(e: JSONError) -> Self {
+		Self::JSONError(e)
+	}
+}
 impl From<FromUtf8Error> for DeserializationErrorKind {
 	fn from(e: FromUtf8Error) -> Self {
 		Self::FromUTF8Error(e)
@@ -67,10 +77,19 @@ impl From<FromUtf8Error> for DeserializationErrorKind {
 }
 
 
-#[derive(Debug)]
 pub struct DeserializationError {
 	pub field: Option<String>,
 	pub kind: DeserializationErrorKind
+}
+
+
+impl Debug for DeserializationError {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		match &self.field {
+			None => write!(f, "Faced the following deserialization error: {:?}", self.kind),
+			Some(x) => write!(f, "Faced the following deserialization error of field: {} => {:?}", x, self.kind)
+		}
+	}
 }
 
 
@@ -88,126 +107,144 @@ impl From<DeserializationErrorKind> for DeserializationError {
 }
 
 
+impl From<DeserializationError> for DeserializationErrorKind {
+	fn from(e: DeserializationError) -> Self {
+		DeserializationErrorKind::Nested(Box::new(e))
+	}
+}
+
+
 #[cfg(feature = "toml")]
 impl From<TOMLError> for DeserializationError {
 	fn from(e: TOMLError) -> Self {
 		Self::from(DeserializationErrorKind::from(e))
 	}
 }
-
-
-#[macro_export]
-macro_rules! map_serde {
-    ($self: expr, $data: expr, $name: ident) => {
-        $data.serde(stringify!($name), &mut $self.$name)?;
-    };
+#[cfg(feature = "json")]
+impl From<JSONError> for DeserializationError {
+	fn from(e: JSONError) -> Self {
+		Self::from(DeserializationErrorKind::from(e))
+	}
 }
-
-
-#[macro_export]
-macro_rules! array_serde {
-    ($self: expr, $data: expr, $name: ident, U8) => {
-        SerdeArrayItemUnsized::serde($data, &mut $self.$name, SizeType::U8)?;
-    };
-    ($self: expr, $data: expr, $name: ident, U16) => {
-        SerdeArrayItemUnsized::serde($data, &mut $self.$name, SizeType::U16)?;
-    };
-    ($self: expr, $data: expr, $name: ident, U32) => {
-        SerdeArrayItemUnsized::serde($data, &mut $self.$name, SizeType::U32)?;
-    };
-    ($self: expr, $data: expr, $name: ident, $size: expr) => {
-        SerdeArrayItemUnsized::serde_sized($data, &mut $self.$name, $size)?;
-    };
-    ($self: expr, $data: expr, $name: ident) => {
-        SerdeArrayItemSized::serde($data, &mut $self.$name)?;
-    };
-}
-
-
-/// Initializes the implementing type with uninitialized memory.
-/// This is fast, and safe IF all values and references are initialized properly after creation.
-/// If the implementing type implements Default, Initialize is implemented safely using default.
-/// Only implement this trait if performance is important, and you can absolutely guarantee that all
-/// uninitialized memory is replaced with valid data
-pub unsafe trait Initialize: Sized {
-	/// Creates an instance of Self.
-	/// The default implementation is very unsafe, so
-	/// ensure that all data in Self is initialized to valid data
-	#[inline]
-	unsafe fn unsafe_init() -> Self {
-		MaybeUninit::zeroed().assume_init()
+impl From<FromUtf8Error> for DeserializationError {
+	fn from(e: FromUtf8Error) -> Self {
+		Self::from(DeserializationErrorKind::from(e))
 	}
 }
 
 
-unsafe impl<T: Default> Initialize for T {
-	#[inline]
-	unsafe fn unsafe_init() -> Self {
-		Self::default()
+/// For types that can be serialized as is
+pub trait SerializeItem<T> {
+	fn serialize(&mut self, item: T);
+	fn serialize_key<K: Borrow<str>>(&mut self, key: K, item: T);
+	// fn serialize_boxed(&mut self, item: Box<T>) {
+	// 	self.serialize(*item);
+	// }
+	// fn serialize_key_boxed<K: Borrow<str>>(&mut self, key: K, item: Box<T>) {
+	// 	self.serialize_key(key, *item);
+	// }
+	// fn serialize_option(&mut self, item: Option<T>) {
+	// 	match item {
+	// 		Some(x) => self.se
+	// 	}
+	// }
+}
+
+
+/// For types that must be serialized alongside their size
+pub trait SerializeItemAutoSize<T> {
+	fn serialize(&mut self, item: T, size_type: SizeType);
+	fn serialize_key<K: Borrow<str>>(&mut self, key: K, item: T, size_type: SizeType);
+}
+
+
+/// For types that can be deserialized as is.
+/// In other words, the true size of the type is fixed
+pub trait DeserializeItem<T> {
+	fn deserialize(&mut self) -> Result<T, DeserializationErrorKind>;
+	fn deserialize_key<K: Borrow<str>>(&mut self, key: K) -> Result<T, DeserializationErrorKind>;
+}
+
+
+/// For types whose sizes can vary.
+/// This will look for a number representing the size of the item to deserialize.
+/// For use with SerializeItemAutoSize
+pub trait DeserializeItemAutoSize<T> {
+	fn deserialize(&mut self, size_type: SizeType) -> Result<T, DeserializationErrorKind>;
+	fn deserialize_key<K: Borrow<str>>(&mut self, key: K, size_type: SizeType) -> Result<T, DeserializationErrorKind>;
+}
+
+
+/// For deserializing types with a given size
+pub trait DeserializeItemVarSize<T> {
+	fn deserialize(&mut self, size: usize) -> Result<T, DeserializationErrorKind>;
+	fn deserialize_key<K: Borrow<str>>(&mut self, key: K, size: usize) -> Result<T, DeserializationErrorKind>;
+}
+
+
+impl<T, V> SerializeItem<Box<V>> for T where T: SerializeItem<V> {
+	fn serialize(&mut self, item: Box<V>) {
+		SerializeItem::<V>::serialize(self, *item);
+	}
+
+	fn serialize_key<K: Borrow<str>>(&mut self, key: K, item: Box<V>) {
+		SerializeItem::<V>::serialize_key(self, key, *item);
 	}
 }
 
 
-pub trait MappedSerde<ProfileMarker>: Initialize {
-	fn serde<T: MapAccess>(&mut self, data: &mut MapDataContainer<T>) -> Result<(), DeserializationError>;
-	fn serialize<T: MapAccess>(mut self, inner_data: T) -> T {
-		let mut data = MapDataContainer {
-			serializing: true,
-			data: inner_data
-		};
-		self.serde(&mut data).expect("Faced an unexpected error during serialization. This should not be the case");
-		data.data
+impl<T, V> SerializeItem<Option<V>> for T where T: SerializeItem<V> {
+	fn serialize(&mut self, item: Option<V>) {
+		match item {
+			Some(x) => SerializeItem::<V>::serialize(self, x),
+			None => {}
+		}
 	}
-	fn deserialize<T: MapAccess>(inner_data: T) -> Result<Self, DeserializationError> {
-		unsafe {
-			let mut data = MapDataContainer {
-				serializing: false,
-				data: inner_data
-			};
-			let mut instance = Self::unsafe_init();
-			instance.serde(&mut data)?;
-			Ok(instance)
+
+	fn serialize_key<K: Borrow<str>>(&mut self, key: K, item: Option<V>) {
+		match item {
+			Some(x) => SerializeItem::<V>::serialize_key(self, key, x),
+			None => {}
 		}
 	}
 }
 
 
-pub trait ArraySerde<ProfileMarker>: Initialize {
-	fn serde<T: ArrayAccess>(&mut self, data: &mut ArrayDataContainer<T>) -> Result<(), DeserializationError>;
-	fn serialize<T: ArrayAccess>(mut self, inner_data: T) -> T {
-		let mut data = ArrayDataContainer {
-			serializing: true,
-			data: inner_data
-		};
-		self.serde(&mut data).expect("Faced an unexpected error during serialization. This should not be the case");
-		data.data
-	}
-	fn deserialize<T: ArrayAccess>(inner_data: T) -> Result<Self, DeserializationError> {
-		unsafe {
-			let mut data = ArrayDataContainer {
-				serializing: false,
-				data: inner_data
-			};
-			let mut instance = Self::unsafe_init();
-			instance.serde(&mut data)?;
-			Ok(instance)
-		}
+/// A standard toolset for serializing and deserializing a wide variety of types
+pub trait ItemAccess:
+	SerializeItem<u8> + SerializeItem<u16> + SerializeItem<String> + SerializeItemAutoSize<String> +
+	DeserializeItem<u8> + DeserializeItem<u16> + DeserializeItemVarSize<String> + DeserializeItemAutoSize<String>
+{
+	const CAN_GET_KEY: bool = false;
+	fn empty() -> Self;
+	fn try_get_key(&self) -> Option<&str> {
+		None
 	}
 }
 
+
+pub trait Serialize<ProfileMarker> {
+	fn serialize<T: ItemAccess>(self) -> T;
+}
+
+
+pub trait Deserialize<ProfileMarker>: Sized {
+	fn deserialize<T: ItemAccess>(data: T) -> Result<Self, DeserializationError>;
+}
+
+/// A marker trait for types that can be serialized and deserialized with the same profile
+pub trait Serde<ProfileMarker>: Serialize<ProfileMarker> + Deserialize<ProfileMarker> {}
+impl<P, T: Serialize<P> + Deserialize<P>> Serde<P> for T {}
 
 pub struct ReadableProfile;
-
 pub struct EfficientProfile;
 
 
 #[cfg(test)]
 mod tests {
-	use crate::array::{SerdeArrayItemSized, SerdeArrayItemUnsized, SizeType};
 	use crate::bin::BinSerde;
 	use crate::toml::TOMLSerde;
-
-    use super::*;
+	use super::*;
 
     #[derive(Debug)]
 	struct TestStruct {
@@ -216,28 +253,58 @@ mod tests {
 		age: u16
 	}
 
-	unsafe impl Initialize for TestStruct {}
+	#[derive(Debug)]
+	struct TestStruct2 {
+		one: TestStruct,
+		two: TestStruct
+	}
 
-	impl MappedSerde<ReadableProfile> for TestStruct {
-		fn serde<T: MapAccess>(&mut self, data: &mut MapDataContainer<T>) -> Result<(), DeserializationError> {
-			map_serde!(self, data, name);
-			map_serde!(self, data, id);
-			map_serde!(self, data, age);
-			Ok(())
+	impl Serialize<ReadableProfile> for TestStruct {
+		fn serialize<T: ItemAccess>(self) -> T {
+			let mut data = T::empty();
+
+			SerializeItemAutoSize::serialize_key(&mut data, "name", self.name, SizeType::U8);
+			SerializeItemAutoSize::serialize_key(&mut data, "id", self.id, SizeType::U8);
+			SerializeItem::serialize_key(&mut data, "age", self.age);
+
+			data
 		}
 	}
 
-	impl ArraySerde<EfficientProfile> for TestStruct {
-		fn serde<T: ArrayAccess>(&mut self, data: &mut ArrayDataContainer<T>) -> Result<(), DeserializationError> {
-			array_serde!(self, data, name, U8);
-			array_serde!(self, data, id, 2);
-			array_serde!(self, data, age);
-			Ok(())
+	impl Deserialize<ReadableProfile> for TestStruct {
+		fn deserialize<T: ItemAccess>(mut data: T) -> Result<Self, DeserializationError> {
+			Ok(Self {
+				name: DeserializeItemAutoSize::deserialize_key(&mut data, "name", SizeType::U8)?,
+				id: DeserializeItemAutoSize::deserialize_key(&mut data, "id", SizeType::U8)?,
+				age: DeserializeItem::deserialize_key(&mut data, "age")?
+			})
 		}
 	}
 
-	impl TOMLSerde<ReadableProfile> for TestStruct {}
-	impl BinSerde<EfficientProfile> for TestStruct {}
+	impl Serialize<EfficientProfile> for TestStruct {
+		fn serialize<T: ItemAccess>(self) -> T {
+			let mut data = T::empty();
+
+			SerializeItemAutoSize::serialize(&mut data, self.name, SizeType::U8);
+			SerializeItemAutoSize::serialize(&mut data, self.id, SizeType::U8);
+			SerializeItem::serialize(&mut data, self.age);
+
+			data
+		}
+	}
+
+	impl Deserialize<EfficientProfile> for TestStruct {
+		fn deserialize<T: ItemAccess>(mut data: T) -> Result<Self, DeserializationError> {
+			Ok(Self {
+				name: DeserializeItemAutoSize::deserialize(&mut data, SizeType::U8)?,
+				id: DeserializeItemAutoSize::deserialize(&mut data, SizeType::U8)?,
+				age: DeserializeItem::deserialize(&mut data)?
+			})
+		}
+	}
+
+	impl_toml!(TestStruct, ReadableProfile);
+	impl_bin!(TestStruct, EfficientProfile);
 
 	#[test]
 	fn test_serde_0() {
@@ -259,7 +326,26 @@ mod tests {
 			age: 22
 		};
 		let ser = test.serialize_bin();
-		println!("{:?}", ser);
+		println!("{:?}\n", ser);
 		println!("{:?}", TestStruct::deserialize_bin(ser).unwrap());
 	}
+
+	// #[test]
+	// fn test_serde_2() {
+	// 	let test = TestStruct2 {
+	// 		one: TestStruct {
+	// 			name: "a".into(),
+	// 			id: "b".into(),
+	// 			age: 0
+	// 		},
+	// 		two: TestStruct {
+	// 			name: "c".into(),
+	// 			id: "d".into(),
+	// 			age: 2
+	// 		}
+	// 	};
+	// 	let ser = test.serialize_toml();
+	// 	println!("{}", ser);
+	// 	println!("{:?}", TestStruct2::deserialize_toml(ser).unwrap());
+	// }
 }
