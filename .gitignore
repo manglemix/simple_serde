@@ -2,3 +2,5 @@
 /Cargo.lock
 
 .idea/
+
+simple_serde.iml
