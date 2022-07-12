@@ -13,6 +13,12 @@ pub trait TOMLSerde: Sized {
 }
 
 
+pub trait MarshalledTOMLSerde<Marshall>: Sized {
+	fn serialize_toml(self, marshall: &Marshall) -> String;
+	fn deserialize_toml(data: String, marshall: &Marshall) -> Result<Self, DeserializationError>;
+}
+
+
 #[macro_export]
 macro_rules! impl_toml {
     ($name: ty, $profile: ty) => {
@@ -22,6 +28,16 @@ macro_rules! impl_toml {
 			}
 			fn deserialize_toml(data: String) -> Result<Self, DeserializationError> {
 				Deserialize::<$profile>::deserialize::<extern_toml::Value>(data.parse()?)
+			}
+		}
+	};
+    ($name: ty, $profile: ty, $marshall: ty) => {
+		impl crate::toml::MarshalledTOMLSerde for $name {
+			fn serialize_toml(self, marshall: &$marshall) -> String {
+				MarshalledSerialize::<$profile>::serialize::<extern_toml::Value>(self, marshall).to_string()
+			}
+			fn deserialize_toml(data: String, marshall: &$marshall) -> Result<Self, DeserializationError> {
+				MarshalledDeserialize::<$profile>::deserialize::<extern_toml::Value>(data.parse()?, marshall)
 			}
 		}
 	};
@@ -191,6 +207,78 @@ impl<T> SerializeItemAutoSize<T> for Value where Value: SerializeItem<T> {
 	}
 }
 
+
+impl SerializeSerial for Value {
+	fn serialize<P, T: Serialize<P>>(&mut self, item: T, _size_type: SizeType) {
+		match self {
+			Self::Array(x) => {
+				x.push(item.serialize())
+			}
+			_ => {
+				let value = replace(self, Value::Array(Array::new()));
+				let arr = match self {
+					Self::Array(x) => x,
+					_ => unreachable!()
+				};
+				arr.push(value);
+				arr.push(item.serialize());
+			}
+		}
+	}
+
+	fn serialize_key<P, T: Serialize<P>, K: Borrow<str>>(&mut self, key: K, item: T, _size_type: SizeType) {
+		match self {
+			Self::Table(x) => { x.insert(key.borrow().into(), item.serialize()); },
+			Self::Array(x) => {
+				if let Some(Self::Table(x)) = x.last_mut() {
+					x.insert(key.borrow().into(), item.serialize());
+					return
+				}
+				let mut table = Table::new();
+				table.insert(key.borrow().into(), item.serialize());
+				x.push(Value::Table(table));
+			}
+			_ => {
+				let value = replace(self, Value::Array(Array::new()));
+				let arr = match self {
+					Self::Array(x) => x,
+					_ => unreachable!()
+				};
+				arr.push(value);
+				let mut table = Table::new();
+				table.insert(key.borrow().into(), item.serialize());
+				arr.push(Value::Table(table));
+			}
+		};
+	}
+}
+
+impl DeserializeSerial for Value {
+	fn deserialize<P, T: Deserialize<P>>(&mut self, _size_type: SizeType) -> Result<T, DeserializationError> {
+		match self {
+			Self::Array(x) => {
+				if x.is_empty() {
+					return Err(DeserializationError::from(DeserializationErrorKind::UnexpectedEOF))
+				}
+				T::deserialize(x.remove(0))
+			}
+			_ => T::deserialize(self.clone())
+		}
+	}
+
+	fn deserialize_key<P, T: Deserialize<P>, K: Borrow<str>>(&mut self, key: K, _size_type: SizeType) -> Result<T, DeserializationError> {
+		match self {
+			Self::Table(x) => {
+				if let Some(x) = x.remove(key.borrow()) {
+					T::deserialize(x)
+				} else {
+					Err(DeserializationError::new(key.borrow(), DeserializationErrorKind::MissingField))
+				}
+			}
+			_ => Err(DeserializationError::from(DeserializationErrorKind::InvalidType { expected: "Table", actual: "todo!" }))
+		}
+	}
+}
 
 impl ItemAccess for Value {
 	const CAN_GET_KEY: bool = true;

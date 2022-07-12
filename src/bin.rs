@@ -7,6 +7,12 @@ pub trait BinSerde: Sized {
 }
 
 
+pub trait MarshalledBinSerde<Marshall>: Sized {
+	fn serialize_bin(self, marshall: &Marshall) -> Vec<u8>;
+	fn deserialize_bin(data: Vec<u8>, marshall: &Marshall) -> Result<Self, DeserializationError>;
+}
+
+
 #[macro_export]
 macro_rules! impl_bin {
     ($name: ty, $profile: ty) => {
@@ -16,6 +22,16 @@ macro_rules! impl_bin {
 			}
 			fn deserialize_bin(data: Vec<u8>) -> Result<Self, DeserializationError> {
 				Deserialize::<$profile>::deserialize(data)
+			}
+		}
+	};
+    ($name: ty, $profile: ty, $marshall: ty) => {
+		impl crate::toml::MarshalledBinSerde for $name {
+			fn serialize_bin(self, marshall: &$marshall) -> Vec<u8> {
+				MarshalledSerialize::<$profile>::serialize(self, marshall)
+			}
+			fn deserialize_bin(data: Vec<u8>, marshall: &$marshall) -> Result<Self, DeserializationError> {
+				MarshalledDeserialize::<$profile>::deserialize(data, marshall)
 			}
 		}
 	};
@@ -176,18 +192,36 @@ impl SerializeItem<$type> for Vec<u8> {
 }
 
 
-// impl_to_bytes!(u64);
-// impl_to_bytes!(u32);
 impl_to_bytes!(u16);
 impl_to_bytes!(String);
 
+
+trait MissingField {
+	fn missing() -> Self;
+}
+
+
+impl MissingField for DeserializationErrorKind {
+	fn missing() -> Self {
+		DeserializationErrorKind::MissingField
+	}
+}
+
+
+impl MissingField for DeserializationError {
+	fn missing() -> Self {
+		Self::from(DeserializationErrorKind::missing())
+	}
+}
+
 /// Deserialize a type, using the given fn, at the given key
-fn key_deserialize<T, K, F>(bytes: &mut Vec<u8>, key: K, f: F) -> Result<T, DeserializationErrorKind>
+fn key_deserialize<T, K, F, E>(bytes: &mut Vec<u8>, key: K, f: F) -> Result<T, E>
 	where
 		K: Borrow<str>,
-		F: Fn(&mut Vec<u8>) -> Result<T, DeserializationErrorKind>
+		F: Fn(&mut Vec<u8>) -> Result<T, E>,
+		E: MissingField
 {
-	let idx = find_key(bytes, key).ok_or(DeserializationErrorKind::MissingField)?;
+	let idx = find_key(bytes, key).ok_or(E::missing())?;
 	let (first, last) = bytes.split_at(idx);
 	let mut last = last.to_vec();
 	*bytes = first.to_vec();
@@ -260,6 +294,30 @@ impl<T> DeserializeItemAutoSize<T> for Vec<u8> where Vec<u8>: DeserializeItemVar
 
 	fn deserialize_key<K: Borrow<str>>(&mut self, key: K, size_type: SizeType) -> Result<T, DeserializationErrorKind> {
 		key_deserialize(self, key, move |x| { DeserializeItemAutoSize::deserialize(x, size_type) })
+	}
+}
+
+impl SerializeSerial for Vec<u8> {
+	fn serialize<P, T: Serialize<P>>(&mut self, item: T, size_type: SizeType) {
+		let mut bytes: Vec<u8> = item.serialize();
+		self.append(&mut size_to_bytes(bytes.len(), size_type));
+		self.append(&mut bytes);
+	}
+
+	fn serialize_key<P, T: Serialize<P>, K: Borrow<str>>(&mut self, key: K, item: T, size_type: SizeType) {
+		self.append(&mut key.borrow().to_bytes_vec());
+		SerializeSerial::serialize(self, item, size_type);
+	}
+}
+
+impl DeserializeSerial for Vec<u8> {
+	fn deserialize<P, T: Deserialize<P>>(&mut self, size_type: SizeType) -> Result<T, DeserializationError> {
+		let size = bytes_to_size(self, size_type)?;
+		Deserialize::deserialize(split_first_vec(self, size)?)
+	}
+
+	fn deserialize_key<P, T: Deserialize<P>, K: Borrow<str>>(&mut self, key: K, size_type: SizeType) -> Result<T, DeserializationError> {
+		key_deserialize(self, key, move |x| { DeserializeSerial::deserialize(x, size_type) })
 	}
 }
 
