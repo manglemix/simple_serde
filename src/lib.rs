@@ -16,8 +16,8 @@ use extern_toml::de::Error as TOMLError;
 pub mod toml;
 #[cfg(feature = "bin")]
 pub mod bin;
-// #[cfg(feature = "json")]
-// pub mod json;
+#[cfg(feature = "json")]
+pub mod json;
 
 #[derive(Debug, Copy, Clone)]
 pub enum SizeType {
@@ -134,159 +134,156 @@ impl From<FromUtf8Error> for DeserializationError {
 }
 
 
-/// For types that can be serialized as is
-pub trait SerializeItem<T> {
-	fn serialize(&mut self, item: T);
-	fn serialize_key<K: Borrow<str>>(&mut self, key: K, item: T);
+pub enum SimpleNumber {
+	I64(i64),
+	F64(f64)
 }
 
 
-/// For types that must be serialized alongside their size
-pub trait SerializeItemAutoSize<T> {
-	fn serialize(&mut self, item: T, size_type: SizeType);
-	fn serialize_key<K: Borrow<str>>(&mut self, key: K, item: T, size_type: SizeType);
+pub trait NumberType: Sized {
+	fn to_simple(self) -> SimpleNumber;
+	#[cfg(feature = "bin")]
+	fn from_bin(bin: &mut Vec<u8>) -> Result<Self, DeserializationErrorKind>;
+	fn from_i64(int: i64) -> Option<Self>;
+	fn from_f64(float: f64) -> Option<Self>;
 }
 
 
-/// For types that can be deserialized as is.
-/// In other words, the true size of the type is fixed
-pub trait DeserializeItem<T> {
-	fn deserialize(&mut self) -> Result<T, DeserializationErrorKind>;
-	fn deserialize_key<K: Borrow<str>>(&mut self, key: K) -> Result<T, DeserializationErrorKind>;
-}
-
-
-/// For types whose sizes can vary.
-/// This will look for a number representing the size of the item to deserialize.
-/// For use with SerializeItemAutoSize
-pub trait DeserializeItemAutoSize<T> {
-	fn deserialize(&mut self, size_type: SizeType) -> Result<T, DeserializationErrorKind>;
-	fn deserialize_key<K: Borrow<str>>(&mut self, key: K, size_type: SizeType) -> Result<T, DeserializationErrorKind>;
-}
-
-
-/// For deserializing types with a given size
-pub trait DeserializeItemVarSize<T> {
-	fn deserialize(&mut self, size: usize) -> Result<T, DeserializationErrorKind>;
-	fn deserialize_key<K: Borrow<str>>(&mut self, key: K, size: usize) -> Result<T, DeserializationErrorKind>;
-}
-
-
-#[warn(soft_unstable)]
-impl<T, V> SerializeItem<Box<V>> for T where T: SerializeItem<V> {
-	fn serialize(&mut self, item: Box<V>) {
-		SerializeItem::<V>::serialize(self, *item);
+macro_rules! serial_int {
+    ($type: ty) => {
+impl NumberType for $type {
+	fn to_simple(self) -> SimpleNumber {
+		SimpleNumber::I64(self as i64)
 	}
-
-	fn serialize_key<K: Borrow<str>>(&mut self, key: K, item: Box<V>) {
-		SerializeItem::<V>::serialize_key(self, key, *item);
+	#[cfg(feature = "bin")]
+	fn from_bin(bin:&mut Vec<u8>) -> Result<Self, DeserializationErrorKind> {
+		todo!()
+	}
+	fn from_i64(int: i64) -> Option<Self> {
+		Some(int as $type)
+	}
+	fn from_f64(_float: f64) -> Option<Self> {
+		None
 	}
 }
-
-
-#[warn(soft_unstable)]
-impl<T, V> SerializeItem<Option<V>> for T where T: SerializeItem<V> {
-	fn serialize(&mut self, item: Option<V>) {
-		match item {
-			Some(x) => SerializeItem::<V>::serialize(self, x),
-			None => {}
-		}
-	}
-
-	fn serialize_key<K: Borrow<str>>(&mut self, key: K, item: Option<V>) {
-		match item {
-			Some(x) => SerializeItem::<V>::serialize_key(self, key, x),
-			None => {}
-		}
+impl Serialize for $type {
+	fn serialize<T: Serializer>(self) -> T {
+		let mut data = T::empty();
+		data.serialize_num(self);
+		data
 	}
 }
-
-
-/// Allows the serialization of serializable types as items
-pub trait SerializeSerial {
-	fn serialize<P, T: Serialize<P>>(&mut self, item: T, size_type: SizeType);
-	fn serialize_key<P, T: Serialize<P>, K: Borrow<str>>(&mut self, key: K, item: T, size_type: SizeType);
-}
-
-
-/// Allows the deserialization of deserializable types from items
-pub trait DeserializeSerial {
-	fn deserialize<P, T: Deserialize<P>>(&mut self, size_type: SizeType) -> Result<T, DeserializationError>;
-	fn deserialize_key<P, T: Deserialize<P>, K: Borrow<str>>(&mut self, key: K, size_type: SizeType) -> Result<T, DeserializationError>;
-}
-
-
-/// SerializeSerial, but always uses a size type of u32
-pub trait SerializeSerialDefaultSize: SerializeSerial {
-	fn serialize<P, T: Serialize<P>>(&mut self, item: T) {
-		SerializeSerial::serialize(self, item, SizeType::U32);
+impl Deserialize for $type {
+	fn deserialize<T: Serializer>(mut data: T) -> Result<Self, DeserializationError> {
+		data.deserialize_num()
 	}
-	fn serialize_key<P, T: Serialize<P>, K: Borrow<str>>(&mut self, key: K, item: T) {
-		SerializeSerial::serialize_key(self, key, item, SizeType::U32);
+}
+	};
+}
+
+serial_int!(u8);
+serial_int!(u16);
+serial_int!(u32);
+serial_int!(u64);
+serial_int!(i8);
+serial_int!(i16);
+serial_int!(i32);
+serial_int!(i64);
+
+
+macro_rules! serial_string {
+    ($type: ty) => {
+impl Serialize for $type {
+	fn serialize<T: Serializer>(self) -> T {
+		let mut data = T::empty();
+		data.serialize_string(self);
+		data
+	}
+}
+	};
+}
+
+serial_string!(String);
+serial_string!(&str);
+
+impl Deserialize for String {
+	fn deserialize<T: Serializer>(mut data: T) -> Result<Self, DeserializationError> {
+		data.deserialize_string()
 	}
 }
 
 
-/// DeserializeSerial, but always uses a size type of u32
-pub trait DeserializeSerialDefaultSize: DeserializeSerial {
-	fn deserialize<P, T: Deserialize<P>>(&mut self) -> Result<T, DeserializationError> {
-		DeserializeSerial::deserialize(self, SizeType::U32)
+macro_rules! from_string {
+    ($type: ty) => {
+impl Deserialize for $type {
+	fn deserialize<T: Serializer>(mut data: T) -> Result<Self, DeserializationError> {
+		data.deserialize_string().and_then(|x| { Ok(<$type>::from(x)) })
 	}
-	fn deserialize_key<P, T: Deserialize<P>, K: Borrow<str>>(&mut self, key: K) -> Result<T, DeserializationError> {
-		DeserializeSerial::deserialize_key(self, key, SizeType::U32)
-	}
+}
+	};
 }
 
 
-impl<T: SerializeSerial> SerializeSerialDefaultSize for T {}
-impl<T: DeserializeSerial> DeserializeSerialDefaultSize for T {}
+from_string!(std::path::PathBuf);
 
 
 /// A standard toolset for serializing and deserializing a wide variety of types
-pub trait ItemAccess:
-	SerializeItem<u8> + SerializeItem<u16> + SerializeItem<String> + SerializeItemAutoSize<String> +
-	DeserializeItem<u8> + DeserializeItem<u16> + DeserializeItemVarSize<String> + DeserializeItemAutoSize<String> +
-	SerializeSerialDefaultSize + DeserializeSerialDefaultSize
-{
-	const CAN_GET_KEY: bool = false;
-	fn empty() -> Self;
-	fn try_get_key(&self) -> Option<&str> {
-		None
+pub trait PrimitiveSerializer {
+	fn serialize_num<T: NumberType>(&mut self, num: T);
+	fn deserialize_num<T: NumberType>(&mut self) -> Result<T, DeserializationError>;
+
+	fn serialize_string<T: Into<String>>(&mut self, string: T);
+	fn deserialize_string(&mut self) -> Result<String, DeserializationError> {
+		self.deserialize_string_auto_size(SizeType::U32)
 	}
+	fn deserialize_string_sized(&mut self, size: usize) -> Result<String, DeserializationError>;
+	fn deserialize_string_auto_size(&mut self, size_type: SizeType) -> Result<String, DeserializationError>;
+}
+
+
+pub trait Serializer: PrimitiveSerializer {
+	fn empty() -> Self;
+	fn serialize<P, T: Serialize<P>>(&mut self, item: T);
+	fn serialize_key<P, T: Serialize<P>, K: Borrow<str>>(&mut self, key: K, item: T);
+	fn deserialize<P, T: Deserialize<P>>(&mut self) -> Result<T, DeserializationError>;
+	fn deserialize_key<P, T: Deserialize<P>, K: Borrow<str>>(&mut self, key: K) -> Result<T, DeserializationError>;
 }
 
 
 /// Allows the implementing type to be encoded in any type that implements ItemAccess
-pub trait Serialize<ProfileMarker> {
-	fn serialize<T: ItemAccess>(self) -> T;
+pub trait Serialize<ProfileMarker= NaturalProfile> {
+	fn serialize<T: Serializer>(self) -> T;
 }
 
 
 /// Allows the implementing type to be decoded from any type that implements ItemAccess
-pub trait Deserialize<ProfileMarker>: Sized {
-	fn deserialize<T: ItemAccess>(data: T) -> Result<Self, DeserializationError>;
+pub trait Deserialize<ProfileMarker= NaturalProfile>: Sized {
+	fn deserialize<T: Serializer>(data: T) -> Result<Self, DeserializationError>;
 }
 
 
-/// Allows the implementing type to be encoded in any type that implements ItemAccess.
-/// A marshall is passed by reference. Marshalls can be used in any way that is required
-pub trait MarshalledSerialize<ProfileMarker, Marshall> {
-	fn serialize<T: ItemAccess>(self, marshall: &Marshall) -> T;
-}
-
-
-/// Allows the implementing type to be decoded from any type that implements ItemAccess
-/// A marshall is passed by reference. Marshalls can be used in any way that is required.
-/// Most commonly, data from the Marshall can be stored in the implementing type
-pub trait MarshalledDeserialize<'a, ProfileMarker, Marshall>: Sized {
-	fn deserialize<T: ItemAccess>(data: T, marshall: &'a Marshall) -> Result<Self, DeserializationError>;
-}
+// /// Allows the implementing type to be encoded in any type that implements ItemAccess.
+// /// A marshall is passed by reference. Marshalls can be used in any way that is required
+// pub trait MarshalledSerialize<ProfileMarker, Marshall> {
+// 	fn serialize<T: ItemAccess>(self, marshall: &Marshall) -> T;
+// }
+//
+//
+// /// Allows the implementing type to be decoded from any type that implements ItemAccess
+// /// A marshall is passed by reference. Marshalls can be used in any way that is required.
+// /// Most commonly, data from the Marshall can be stored in the implementing type
+// pub trait MarshalledDeserialize<'a, ProfileMarker, Marshall>: Sized {
+// 	fn deserialize<T: ItemAccess>(data: T, marshall: &'a Marshall) -> Result<Self, DeserializationError>;
+// }
 
 /// A marker trait for types that can be serialized and deserialized with the same profile,
 /// without a marshall. Is automatically implemented for all appropriate types
 pub trait Serde<ProfileMarker>: Serialize<ProfileMarker> + Deserialize<ProfileMarker> {}
 impl<P, T: Serialize<P> + Deserialize<P>> Serde<P> for T {}
 
+/// A marker type for serialization and deserialization of data.
+/// the default way that a type should be serialized. Mainly used for common types like ints, String, etc
+pub struct NaturalProfile;
 /// A marker type for serialization and deserialization of human readable data
 pub struct ReadableProfile;
 /// A marker type for serialization and deserialization of memory/processor efficient data
@@ -295,9 +292,11 @@ pub struct EfficientProfile;
 
 #[cfg(test)]
 mod tests {
-	use crate::bin::BinSerde;
-	use crate::toml::TOMLSerde;
-	use super::*;
+	#[cfg(feature = "bin")]
+	use crate::bin::{BinSerde, impl_bin};
+	use crate::{DeserializationError, Deserialize, EfficientProfile, ReadableProfile, Serialize, Serializer};
+	#[cfg(feature = "toml")]
+	use crate::toml::{TOMLSerde, impl_toml};
 
     #[derive(Debug)]
 	struct TestStruct {
@@ -318,95 +317,100 @@ mod tests {
 	}
 
 	impl Serialize<ReadableProfile> for TestStruct {
-		fn serialize<T: ItemAccess>(self) -> T {
+		fn serialize<T: Serializer>(self) -> T {
 			let mut data = T::empty();
 
-			SerializeItemAutoSize::serialize_key(&mut data, "name", self.name, SizeType::U8);
-			SerializeItemAutoSize::serialize_key(&mut data, "id", self.id, SizeType::U8);
-			SerializeItem::serialize_key(&mut data, "age", self.age);
+			data.serialize_key("name", self.name);
+			data.serialize_key("age", self.age);
+			data.serialize_key("id", self.id);
 
 			data
 		}
 	}
 
 	impl Deserialize<ReadableProfile> for TestStruct {
-		fn deserialize<T: ItemAccess>(mut data: T) -> Result<Self, DeserializationError> {
+		fn deserialize<T: Serializer>(mut data: T) -> Result<Self, DeserializationError> {
 			Ok(Self {
-				name: DeserializeItemAutoSize::deserialize_key(&mut data, "name", SizeType::U8)?,
-				id: DeserializeItemAutoSize::deserialize_key(&mut data, "id", SizeType::U8)?,
-				age: DeserializeItem::deserialize_key(&mut data, "age")?
+				name: data.deserialize_key("name")?,
+				id: data.deserialize_key("id")?,
+				age: data.deserialize_key("age")?
 			})
 		}
 	}
 
 	impl Serialize<EfficientProfile> for TestStruct {
-		fn serialize<T: ItemAccess>(self) -> T {
+		fn serialize<T: Serializer>(self) -> T {
 			let mut data = T::empty();
 
-			SerializeItemAutoSize::serialize(&mut data, self.name, SizeType::U8);
-			SerializeItemAutoSize::serialize(&mut data, self.id, SizeType::U8);
-			SerializeItem::serialize(&mut data, self.age);
+			data.serialize(self.name);
+			data.serialize(self.age);
+			data.serialize(self.id);
 
 			data
 		}
 	}
 
 	impl Deserialize<EfficientProfile> for TestStruct {
-		fn deserialize<T: ItemAccess>(mut data: T) -> Result<Self, DeserializationError> {
+		fn deserialize<T: Serializer>(mut data: T) -> Result<Self, DeserializationError> {
 			Ok(Self {
-				name: DeserializeItemAutoSize::deserialize(&mut data, SizeType::U8)?,
-				id: DeserializeItemAutoSize::deserialize(&mut data, SizeType::U8)?,
-				age: DeserializeItem::deserialize(&mut data)?
+				name: data.deserialize()?,
+				id: data.deserialize()?,
+				age: data.deserialize()?
 			})
 		}
 	}
 
 	impl Serialize<ReadableProfile> for TestStruct2 {
-		fn serialize<T: ItemAccess>(self) -> T {
+		fn serialize<T: Serializer>(self) -> T {
 			let mut data = T::empty();
 
-			SerializeSerialDefaultSize::serialize_key::<ReadableProfile, _, _>(&mut data, "one", self.one);
-			SerializeSerialDefaultSize::serialize_key::<ReadableProfile, _, _>(&mut data, "two", self.two);
+			data.serialize_key::<ReadableProfile, _, _>("one", self.one);
+			data.serialize_key::<ReadableProfile, _, _>("two", self.two);
 
 			data
 		}
 	}
 
 	impl Deserialize<ReadableProfile> for TestStruct2 {
-		fn deserialize<T: ItemAccess>(mut data: T) -> Result<Self, DeserializationError> {
+		fn deserialize<T: Serializer>(mut data: T) -> Result<Self, DeserializationError> {
 			Ok(Self {
-				one: DeserializeSerialDefaultSize::deserialize_key::<ReadableProfile, _, _>(&mut data, "one")?,
-				two: DeserializeSerialDefaultSize::deserialize_key::<ReadableProfile, _, _>(&mut data, "two")?
+				one: data.deserialize_key::<ReadableProfile, _, _>("one")?,
+				two: data.deserialize_key::<ReadableProfile, _, _>("two")?
 			})
 		}
 	}
 
 	impl<'a> Serialize<ReadableProfile> for TestStruct3<'a> {
-		fn serialize<T: ItemAccess>(self) -> T {
+		fn serialize<T: Serializer>(self) -> T {
 			let mut data = T::empty();
-			SerializeItemAutoSize::serialize(&mut data, self.one.name.clone(), SizeType::U8);
+			data.serialize_key("name", self.one.name.clone());
 			data
 		}
 	}
 
-	impl<'a> MarshalledDeserialize<'a, ReadableProfile, TestStruct2> for TestStruct3<'a> {
-		fn deserialize<T: ItemAccess>(mut data: T, marshall: &'a TestStruct2) -> Result<Self, DeserializationError> {
-			let name: String = DeserializeItemAutoSize::deserialize(&mut data, SizeType::U8)?;
-			if marshall.one.name == name {
-				Ok(Self{ one: &marshall.one })
-			} else if marshall.two.name == name {
-				Ok(Self { one: &marshall.two })
-			} else {
-				Err(DeserializationError::from(DeserializationErrorKind::NoMatch { actual: "todo!".to_string() }))
-			}
-		}
-	}
+	// impl<'a> MarshalledDeserialize<'a, ReadableProfile, TestStruct2> for TestStruct3<'a> {
+	// 	fn deserialize<T: Serializer>(mut data: T, marshall: &'a TestStruct2) -> Result<Self, DeserializationError> {
+	// 		let name: String = DeserializeItemAutoSize::deserialize(&mut data, SizeType::U8)?;
+	// 		if marshall.one.name == name {
+	// 			Ok(Self{ one: &marshall.one })
+	// 		} else if marshall.two.name == name {
+	// 			Ok(Self { one: &marshall.two })
+	// 		} else {
+	// 			Err(DeserializationError::from(DeserializationErrorKind::NoMatch { actual: "todo!".to_string() }))
+	// 		}
+	// 	}
+	// }
 
+	#[cfg(feature = "toml")]
 	impl_toml!(TestStruct, ReadableProfile);
+	#[cfg(feature = "toml")]
 	impl_toml!(TestStruct2, ReadableProfile);
+	#[cfg(feature = "bin")]
 	impl_bin!(TestStruct, EfficientProfile);
+	#[cfg(feature = "bin")]
 	impl_bin!(TestStruct2, ReadableProfile);
 
+	#[cfg(feature = "toml")]
 	#[test]
 	fn test_serde_0() {
 		let test = TestStruct {
@@ -419,6 +423,7 @@ mod tests {
 		println!("{:?}", TestStruct::deserialize_toml(ser).unwrap());
 	}
 
+	#[cfg(feature = "bin")]
 	#[test]
 	fn test_serde_1() {
 		let test = TestStruct {
@@ -431,6 +436,7 @@ mod tests {
 		println!("{:?}", TestStruct::deserialize_bin(ser).unwrap());
 	}
 
+	#[cfg(feature = "toml")]
 	#[test]
 	fn test_serde_2() {
 		let test = TestStruct2 {
@@ -450,6 +456,7 @@ mod tests {
 		println!("{:?}", TestStruct2::deserialize_toml(ser).unwrap());
 	}
 
+	#[cfg(feature = "bin")]
 	#[test]
 	fn test_serde_3() {
 		let test = TestStruct2 {
@@ -469,6 +476,7 @@ mod tests {
 		println!("{:?}", TestStruct2::deserialize_bin(ser).unwrap());
 	}
 
+	#[cfg(feature = "bin")]
 	#[test]
 	fn test_serde_4() {
 		let test = TestStruct2 {

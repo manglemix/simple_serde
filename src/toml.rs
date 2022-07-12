@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap};
 use std::hash::Hash;
 use std::mem::replace;
 use extern_toml::Value;
 use extern_toml::value::{Array, Table};
+// use extern_toml::value::{Array, Table};
 
 use super::*;
 
@@ -43,253 +44,118 @@ macro_rules! impl_toml {
 	};
 }
 
+pub use impl_toml;
 
-macro_rules! impl_ser_from {
-    ($type: ty) => {
-impl SerializeItem<$type> for Value {
-	fn serialize(&mut self, item: $type) {
-		match self {
-			Self::Array(arr) => { arr.push(Value::from(item)); },
-			_ => {
-				let value = replace(self, Value::Array(Array::new()));
-				let arr = match self {
-					Self::Array(x) => x,
-					_ => unreachable!()
-				};
-				arr.push(value);
-				arr.push(Value::from(item));
-			}
+
+fn push_value(origin: &mut Value, item: Value) {
+	match origin {
+		Value::Array(x) => 	if x.is_empty() {
+											*origin = item;
+										} else {
+											x.push(item);
+										}
+		Value::Table(x) => 	if x.is_empty() {
+											*origin = item;
+										} else {
+											panic!("Tried to push onto table!")
+										}
+		_ => {
+			let last = replace(origin, Value::Array(Array::new()));
+			let arr = match origin {
+				Value::Array(x) => x,
+				_ => unreachable!()
+			};
+			arr.push(last);
+			arr.push(item);
 		}
 	}
+}
 
-	fn serialize_key<K: Borrow<str>>(&mut self, key: K, item: $type) {
-		match self {
-			Self::Table(x) => { x.insert(key.borrow().into(), Value::from(item)); },
-			Self::Array(x) => {
-				if let Some(Self::Table(x)) = x.last_mut() {
-					x.insert(key.borrow().into(), Value::from(item));
-					return
-				}
-				let mut table = Table::new();
-				table.insert(key.borrow().into(), Value::from(item));
-				x.push(Value::Table(table));
-			}
-			_ => {
-				let value = replace(self, Value::Array(Array::new()));
-				let arr = match self {
-					Self::Array(x) => x,
-					_ => unreachable!()
-				};
-				arr.push(value);
-				let mut table = Table::new();
-				table.insert(key.borrow().into(), Value::from(item));
-				arr.push(Value::Table(table));
-			}
+
+fn push_entry<K: Into<String>>(origin: &mut Value, key: K, item: Value) {
+	match origin {
+		Value::Table(x) => { x.insert(key.into(), item); }
+		Value::Array(x) => {
+			let mut table = Table::new();
+			table.insert(key.into(), item);
+			x.push(Value::Table(table));
+		}
+		_ => {
+			let last = replace(origin, Value::Array(Array::new()));
+			let arr = match origin {
+				Value::Array(x) => x,
+				_ => unreachable!()
+			};
+			arr.push(last);
+
+			let mut table = Table::new();
+			table.insert(key.into(), item);
+
+			arr.push(Value::Table(table));
+		}
+	}
+}
+
+
+impl PrimitiveSerializer for Value {
+	fn serialize_num<T: NumberType>(&mut self, num: T) {
+		let val = match num.to_simple() {
+			SimpleNumber::I64(x) => Self::Integer(x),
+			SimpleNumber::F64(x) => Self::Float(x)
 		};
-	}
-}
-	};
-}
-
-
-impl_ser_from!(String);
-impl_ser_from!(u32);
-impl_ser_from!(u8);
-
-
-impl SerializeItem<u16> for Value {
-	fn serialize(&mut self, item: u16) {
-		SerializeItem::serialize(self, item as u32);
+		push_value(self, val);
 	}
 
-	fn serialize_key<K: Borrow<str>>(&mut self, key: K, item: u16) {
-		SerializeItem::serialize_key(self, key, item as u32);
-	}
-}
-
-
-impl DeserializeItem<i64> for Value {
-	fn deserialize(&mut self) -> Result<i64, DeserializationErrorKind> {
+	fn deserialize_num<T: NumberType>(&mut self) -> Result<T, DeserializationError> {
 		match self {
-			Self::Integer(x) => Ok(x.clone()),
-			Self::Array(x) => {
-				if x.is_empty() {
-					return Err(DeserializationErrorKind::UnexpectedEOF)
-				}
-				DeserializeItem::<i64>::deserialize(&mut x.remove(0))
-			}
-			_ => Err(DeserializationErrorKind::InvalidType { expected: "Array or Integer", actual: "todo!" })
+			Value::Integer(x) => T::from_i64(x.clone()).ok_or(DeserializationError::from(DeserializationErrorKind::InvalidType { expected: "unsigned int", actual: "signed int" })),
+			Value::Float(x) => T::from_f64(x.clone()).ok_or(DeserializationError::from(DeserializationErrorKind::InvalidType { expected: "integer", actual: "float" })),
+			Value::Array(x) => x.remove(0).deserialize_num(),
+			_ => Err(DeserializationError::from(DeserializationErrorKind::InvalidType { expected: "number", actual: "todo!" }))
 		}
 	}
 
-	fn deserialize_key<K: Borrow<str>>(&mut self, key: K) -> Result<i64, DeserializationErrorKind> {
+	fn serialize_string<T: Into<String>>(&mut self, string: T) {
+		push_value(self, Value::String(string.into()));
+	}
+
+	fn deserialize_string_sized(&mut self, _size: usize) -> Result<String, DeserializationError> {
 		match self {
-			Self::Table(x) => {
-				let mut val = x.remove(key.borrow()).ok_or(DeserializationErrorKind::MissingField)?;
-				DeserializeItem::<i64>::deserialize(&mut val)
-			},
-			_ => Err(DeserializationErrorKind::InvalidType { expected: "Table", actual: "todo!" })
-		}
-	}
-}
-
-
-macro_rules! impl_de_int {
-    ($int: ty) => {
-impl DeserializeItem<$int> for Value {
-	fn deserialize(&mut self) -> Result<$int, DeserializationErrorKind> {
-		DeserializeItem::<i64>::deserialize(self).and_then(|n| { Ok(n as $int) })
-	}
-
-	fn deserialize_key<K: Borrow<str>>(&mut self, key: K) -> Result<$int, DeserializationErrorKind> {
-		DeserializeItem::<i64>::deserialize_key(self, key).and_then(|n| { Ok(n as $int) })
-	}
-}
-	};
-}
-
-impl_de_int!(u8);
-impl_de_int!(u16);
-
-
-impl DeserializeItem<String> for Value {
-	fn deserialize(&mut self) -> Result<String, DeserializationErrorKind> {
-		match self {
-			Self::Array(x) => {
-				if x.is_empty() {
-					return Err(DeserializationErrorKind::UnexpectedEOF)
-				}
-				DeserializeItem::deserialize(&mut x.remove(0))
-			}
-			_ => self.clone().try_into().map_err(Into::into)
+			Value::String(x) => Ok(x.clone()),
+			Value::Array(x) => x.remove(0).deserialize_string_sized(0),
+			_ => Err(DeserializationError::from(DeserializationErrorKind::InvalidType { expected: "string", actual: "todo!" }))
 		}
 	}
 
-	fn deserialize_key<K: Borrow<str>>(&mut self, key: K) -> Result<String, DeserializationErrorKind> {
+	fn deserialize_string_auto_size(&mut self, _size_type: SizeType) -> Result<String, DeserializationError> {
+		self.deserialize_string_sized(0)
+	}
+}
+
+impl Serializer for Value {
+	fn empty() -> Self {
+		Self::Table(Table::new())
+	}
+
+	fn serialize<P, T: Serialize<P>>(&mut self, item: T) {
+		push_value(self, item.serialize());
+	}
+
+	fn serialize_key<P, T: Serialize<P>, K: Borrow<str>>(&mut self, key: K, item: T) {
+		push_entry(self, key.borrow(), item.serialize());
+	}
+
+	fn deserialize<P, T: Deserialize<P>>(&mut self) -> Result<T, DeserializationError> {
 		match self {
-			Self::Table(x) => {
-				let val = x.remove(key.borrow()).ok_or(DeserializationErrorKind::MissingField)?;
-				val.try_into().map_err(Into::into)
-			},
-			_ => Err(DeserializationErrorKind::InvalidType { expected: "Table", actual: "todo!" })
-		}
-	}
-}
-
-
-impl<T> DeserializeItemVarSize<T> for Value where Value: DeserializeItem<T> {
-	fn deserialize(&mut self, _size: usize) -> Result<T, DeserializationErrorKind> {
-		DeserializeItem::deserialize(self)
-	}
-
-	fn deserialize_key<K: Borrow<str>>(&mut self, key: K, _size: usize) -> Result<T, DeserializationErrorKind> {
-		DeserializeItem::deserialize_key(self, key)
-	}
-}
-
-impl<T> DeserializeItemAutoSize<T> for Value where Value: DeserializeItem<T> {
-	fn deserialize(&mut self, _size_type: SizeType) -> Result<T, DeserializationErrorKind> {
-		DeserializeItem::deserialize(self)
-	}
-
-	fn deserialize_key<K: Borrow<str>>(&mut self, key: K, _size_type: SizeType) -> Result<T, DeserializationErrorKind> {
-		DeserializeItem::deserialize_key(self, key)
-	}
-}
-
-impl<T> SerializeItemAutoSize<T> for Value where Value: SerializeItem<T> {
-	fn serialize(&mut self, item: T, _size_type: SizeType) {
-		SerializeItem::serialize(self, item);
-	}
-
-	fn serialize_key<K: Borrow<str>>(&mut self, key: K, item: T, _size_type: SizeType) {
-		SerializeItem::serialize_key(self, key, item);
-	}
-}
-
-
-impl SerializeSerial for Value {
-	fn serialize<P, T: Serialize<P>>(&mut self, item: T, _size_type: SizeType) {
-		match self {
-			Self::Array(x) => {
-				x.push(item.serialize())
-			}
-			_ => {
-				let value = replace(self, Value::Array(Array::new()));
-				let arr = match self {
-					Self::Array(x) => x,
-					_ => unreachable!()
-				};
-				arr.push(value);
-				arr.push(item.serialize());
-			}
-		}
-	}
-
-	fn serialize_key<P, T: Serialize<P>, K: Borrow<str>>(&mut self, key: K, item: T, _size_type: SizeType) {
-		match self {
-			Self::Table(x) => { x.insert(key.borrow().into(), item.serialize()); },
-			Self::Array(x) => {
-				if let Some(Self::Table(x)) = x.last_mut() {
-					x.insert(key.borrow().into(), item.serialize());
-					return
-				}
-				let mut table = Table::new();
-				table.insert(key.borrow().into(), item.serialize());
-				x.push(Value::Table(table));
-			}
-			_ => {
-				let value = replace(self, Value::Array(Array::new()));
-				let arr = match self {
-					Self::Array(x) => x,
-					_ => unreachable!()
-				};
-				arr.push(value);
-				let mut table = Table::new();
-				table.insert(key.borrow().into(), item.serialize());
-				arr.push(Value::Table(table));
-			}
-		};
-	}
-}
-
-impl DeserializeSerial for Value {
-	fn deserialize<P, T: Deserialize<P>>(&mut self, _size_type: SizeType) -> Result<T, DeserializationError> {
-		match self {
-			Self::Array(x) => {
-				if x.is_empty() {
-					return Err(DeserializationError::from(DeserializationErrorKind::UnexpectedEOF))
-				}
-				T::deserialize(x.remove(0))
-			}
+			Self::Array(x) => T::deserialize(x.remove(0)),
 			_ => T::deserialize(self.clone())
 		}
 	}
 
-	fn deserialize_key<P, T: Deserialize<P>, K: Borrow<str>>(&mut self, key: K, _size_type: SizeType) -> Result<T, DeserializationError> {
+	fn deserialize_key<P, T: Deserialize<P>, K: Borrow<str>>(&mut self, key: K) -> Result<T, DeserializationError> {
 		match self {
-			Self::Table(x) => {
-				if let Some(x) = x.remove(key.borrow()) {
-					T::deserialize(x)
-				} else {
-					Err(DeserializationError::new(key.borrow(), DeserializationErrorKind::MissingField))
-				}
-			}
-			_ => Err(DeserializationError::from(DeserializationErrorKind::InvalidType { expected: "Table", actual: "todo!" }))
-		}
-	}
-}
-
-impl ItemAccess for Value {
-	const CAN_GET_KEY: bool = true;
-
-	fn empty() -> Self {
-		Value::Table(Table::new())
-	}
-	fn try_get_key(&self) -> Option<&str> {
-		match self {
-			Value::Table(x) => x.keys().next().and_then(|x| { Some(x.as_str()) }),
-			_ => None
+			Self::Table(x) => T::deserialize(x.remove(key.borrow()).ok_or(DeserializationError::from(DeserializationErrorKind::MissingField))?),
+			_ => Err(DeserializationError::from(DeserializationErrorKind::InvalidType { expected: "table", actual: "todo!" }))
 		}
 	}
 }
