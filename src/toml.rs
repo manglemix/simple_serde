@@ -3,7 +3,6 @@ use std::hash::Hash;
 use std::mem::replace;
 use extern_toml::Value;
 use extern_toml::value::{Array, Table};
-// use extern_toml::value::{Array, Table};
 
 use super::*;
 
@@ -28,7 +27,7 @@ macro_rules! impl_toml {
 				Serialize::<$profile>::serialize::<extern_toml::Value>(self).to_string()
 			}
 			fn deserialize_toml(data: String) -> Result<Self, DeserializationError> {
-				Deserialize::<$profile>::deserialize::<extern_toml::Value>(data.parse()?)
+				Deserialize::<$profile>::deserialize::<extern_toml::Value, extern_toml::Value>(data.parse()?)
 			}
 		}
 	};
@@ -49,11 +48,7 @@ pub use impl_toml;
 
 fn push_value(origin: &mut Value, item: Value) {
 	match origin {
-		Value::Array(x) => 	if x.is_empty() {
-											*origin = item;
-										} else {
-											x.push(item);
-										}
+		Value::Array(x) => x.push(item),
 		Value::Table(x) => 	if x.is_empty() {
 											*origin = item;
 										} else {
@@ -119,16 +114,12 @@ impl PrimitiveSerializer for Value {
 		push_value(self, Value::String(string.into()));
 	}
 
-	fn deserialize_string_sized(&mut self, _size: usize) -> Result<String, DeserializationError> {
+	fn deserialize_string(&mut self) -> Result<String, DeserializationError> {
 		match self {
 			Value::String(x) => Ok(x.clone()),
-			Value::Array(x) => x.remove(0).deserialize_string_sized(0),
+			Value::Array(x) => x.remove(0).deserialize_string(),
 			_ => Err(DeserializationError::from(DeserializationErrorKind::InvalidType { expected: "string", actual: "todo!" }))
 		}
-	}
-
-	fn deserialize_string_auto_size(&mut self, _size_type: SizeType) -> Result<String, DeserializationError> {
-		self.deserialize_string_sized(0)
 	}
 }
 

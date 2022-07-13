@@ -3,7 +3,7 @@ extern crate json as extern_json;
 #[cfg(feature = "toml")]
 extern crate toml as extern_toml;
 
-use std::borrow::Borrow;
+use std::borrow::{Borrow, BorrowMut};
 use std::fmt::{Debug, Formatter};
 use std::string::FromUtf8Error;
 
@@ -144,6 +144,8 @@ pub trait NumberType: Sized {
 	fn to_simple(self) -> SimpleNumber;
 	#[cfg(feature = "bin")]
 	fn from_bin(bin: &mut Vec<u8>) -> Result<Self, DeserializationErrorKind>;
+	#[cfg(feature = "bin")]
+	fn to_bin(self) -> Vec<u8>;
 	fn from_i64(int: i64) -> Option<Self>;
 	fn from_f64(float: f64) -> Option<Self>;
 }
@@ -157,7 +159,11 @@ impl NumberType for $type {
 	}
 	#[cfg(feature = "bin")]
 	fn from_bin(bin:&mut Vec<u8>) -> Result<Self, DeserializationErrorKind> {
-		todo!()
+		Ok(Self::from_be_bytes(crate::bin::split_first(bin)?))
+	}
+	#[cfg(feature = "bin")]
+	fn to_bin(self) -> Vec<u8> {
+		self.to_be_bytes().to_vec()
 	}
 	fn from_i64(int: i64) -> Option<Self> {
 		Some(int as $type)
@@ -174,8 +180,8 @@ impl Serialize for $type {
 	}
 }
 impl Deserialize for $type {
-	fn deserialize<T: Serializer>(mut data: T) -> Result<Self, DeserializationError> {
-		data.deserialize_num()
+	fn deserialize<T: Serializer, R: BorrowMut<T>>(mut data: R) -> Result<Self, DeserializationError> {
+		data.borrow_mut().deserialize_num()
 	}
 }
 	};
@@ -185,10 +191,12 @@ serial_int!(u8);
 serial_int!(u16);
 serial_int!(u32);
 serial_int!(u64);
+serial_int!(usize);
 serial_int!(i8);
 serial_int!(i16);
 serial_int!(i32);
 serial_int!(i64);
+serial_int!(isize);
 
 
 macro_rules! serial_string {
@@ -207,8 +215,8 @@ serial_string!(String);
 serial_string!(&str);
 
 impl Deserialize for String {
-	fn deserialize<T: Serializer>(mut data: T) -> Result<Self, DeserializationError> {
-		data.deserialize_string()
+	fn deserialize<T: Serializer, R: BorrowMut<T>>(mut data: R) -> Result<Self, DeserializationError> {
+		data.borrow_mut().deserialize_string()
 	}
 }
 
@@ -216,8 +224,8 @@ impl Deserialize for String {
 macro_rules! from_string {
     ($type: ty) => {
 impl Deserialize for $type {
-	fn deserialize<T: Serializer>(mut data: T) -> Result<Self, DeserializationError> {
-		data.deserialize_string().and_then(|x| { Ok(<$type>::from(x)) })
+	fn deserialize<T: Serializer, R: BorrowMut<T>>(mut data: R) -> Result<Self, DeserializationError> {
+		data.borrow_mut().deserialize_string().and_then(|x| { Ok(<$type>::from(x)) })
 	}
 }
 	};
@@ -233,11 +241,7 @@ pub trait PrimitiveSerializer {
 	fn deserialize_num<T: NumberType>(&mut self) -> Result<T, DeserializationError>;
 
 	fn serialize_string<T: Into<String>>(&mut self, string: T);
-	fn deserialize_string(&mut self) -> Result<String, DeserializationError> {
-		self.deserialize_string_auto_size(SizeType::U32)
-	}
-	fn deserialize_string_sized(&mut self, size: usize) -> Result<String, DeserializationError>;
-	fn deserialize_string_auto_size(&mut self, size_type: SizeType) -> Result<String, DeserializationError>;
+	fn deserialize_string(&mut self) -> Result<String, DeserializationError>;
 }
 
 
@@ -258,23 +262,23 @@ pub trait Serialize<ProfileMarker= NaturalProfile> {
 
 /// Allows the implementing type to be decoded from any type that implements ItemAccess
 pub trait Deserialize<ProfileMarker= NaturalProfile>: Sized {
-	fn deserialize<T: Serializer>(data: T) -> Result<Self, DeserializationError>;
+	fn deserialize<T: Serializer, R: BorrowMut<T>>(data: R) -> Result<Self, DeserializationError>;
 }
 
 
-// /// Allows the implementing type to be encoded in any type that implements ItemAccess.
-// /// A marshall is passed by reference. Marshalls can be used in any way that is required
-// pub trait MarshalledSerialize<ProfileMarker, Marshall> {
-// 	fn serialize<T: ItemAccess>(self, marshall: &Marshall) -> T;
-// }
-//
-//
-// /// Allows the implementing type to be decoded from any type that implements ItemAccess
-// /// A marshall is passed by reference. Marshalls can be used in any way that is required.
-// /// Most commonly, data from the Marshall can be stored in the implementing type
-// pub trait MarshalledDeserialize<'a, ProfileMarker, Marshall>: Sized {
-// 	fn deserialize<T: ItemAccess>(data: T, marshall: &'a Marshall) -> Result<Self, DeserializationError>;
-// }
+/// Allows the implementing type to be encoded in any type that implements ItemAccess.
+/// A marshall is passed by reference. Marshalls can be used in any way that is required
+pub trait MarshalledSerialize<ProfileMarker, Marshall> {
+	fn serialize<T: Serializer>(self, marshall: &Marshall) -> T;
+}
+
+
+/// Allows the implementing type to be decoded from any type that implements ItemAccess
+/// A marshall is passed by reference. Marshalls can be used in any way that is required.
+/// Most commonly, data from the Marshall can be stored in the implementing type
+pub trait MarshalledDeserialize<'a, ProfileMarker, Marshall>: Sized {
+	fn deserialize<T: Serializer, R: BorrowMut<T>>(data: R, marshall: &'a Marshall) -> Result<Self, DeserializationError>;
+}
 
 /// A marker trait for types that can be serialized and deserialized with the same profile,
 /// without a marshall. Is automatically implemented for all appropriate types
@@ -292,9 +296,10 @@ pub struct EfficientProfile;
 
 #[cfg(test)]
 mod tests {
+	use std::borrow::BorrowMut;
 	#[cfg(feature = "bin")]
 	use crate::bin::{BinSerde, impl_bin};
-	use crate::{DeserializationError, Deserialize, EfficientProfile, ReadableProfile, Serialize, Serializer};
+	use crate::{DeserializationError, DeserializationErrorKind, Deserialize, EfficientProfile, MarshalledDeserialize, ReadableProfile, Serialize, Serializer};
 	#[cfg(feature = "toml")]
 	use crate::toml::{TOMLSerde, impl_toml};
 
@@ -329,11 +334,12 @@ mod tests {
 	}
 
 	impl Deserialize<ReadableProfile> for TestStruct {
-		fn deserialize<T: Serializer>(mut data: T) -> Result<Self, DeserializationError> {
+		fn deserialize<T: Serializer, R: BorrowMut<T>>(mut data: R) -> Result<Self, DeserializationError> {
+			let data_ref = data.borrow_mut();
 			Ok(Self {
-				name: data.deserialize_key("name")?,
-				id: data.deserialize_key("id")?,
-				age: data.deserialize_key("age")?
+				name: data_ref.deserialize_key("name")?,
+				id: data_ref.deserialize_key("id")?,
+				age: data_ref.deserialize_key("age")?
 			})
 		}
 	}
@@ -351,11 +357,12 @@ mod tests {
 	}
 
 	impl Deserialize<EfficientProfile> for TestStruct {
-		fn deserialize<T: Serializer>(mut data: T) -> Result<Self, DeserializationError> {
+		fn deserialize<T: Serializer, R: BorrowMut<T>>(mut data: R) -> Result<Self, DeserializationError> {
+			let data_ref = data.borrow_mut();
 			Ok(Self {
-				name: data.deserialize()?,
-				id: data.deserialize()?,
-				age: data.deserialize()?
+				name: data_ref.deserialize()?,
+				age: data_ref.deserialize()?,
+				id: data_ref.deserialize()?,
 			})
 		}
 	}
@@ -372,10 +379,11 @@ mod tests {
 	}
 
 	impl Deserialize<ReadableProfile> for TestStruct2 {
-		fn deserialize<T: Serializer>(mut data: T) -> Result<Self, DeserializationError> {
+		fn deserialize<T: Serializer, R: BorrowMut<T>>(mut data: R) -> Result<Self, DeserializationError> {
+			let data_ref = data.borrow_mut();
 			Ok(Self {
-				one: data.deserialize_key::<ReadableProfile, _, _>("one")?,
-				two: data.deserialize_key::<ReadableProfile, _, _>("two")?
+				one: data_ref.deserialize_key::<ReadableProfile, _, _>("one")?,
+				two: data_ref.deserialize_key::<ReadableProfile, _, _>("two")?
 			})
 		}
 	}
@@ -388,18 +396,18 @@ mod tests {
 		}
 	}
 
-	// impl<'a> MarshalledDeserialize<'a, ReadableProfile, TestStruct2> for TestStruct3<'a> {
-	// 	fn deserialize<T: Serializer>(mut data: T, marshall: &'a TestStruct2) -> Result<Self, DeserializationError> {
-	// 		let name: String = DeserializeItemAutoSize::deserialize(&mut data, SizeType::U8)?;
-	// 		if marshall.one.name == name {
-	// 			Ok(Self{ one: &marshall.one })
-	// 		} else if marshall.two.name == name {
-	// 			Ok(Self { one: &marshall.two })
-	// 		} else {
-	// 			Err(DeserializationError::from(DeserializationErrorKind::NoMatch { actual: "todo!".to_string() }))
-	// 		}
-	// 	}
-	// }
+	impl<'a> MarshalledDeserialize<'a, ReadableProfile, TestStruct2> for TestStruct3<'a> {
+		fn deserialize<T: Serializer, R: BorrowMut<T>>(mut data: R, marshall: &'a TestStruct2) -> Result<Self, DeserializationError> {
+			let name: String = data.borrow_mut().deserialize_key("name")?;
+			if marshall.one.name == name {
+				Ok(Self{ one: &marshall.one })
+			} else if marshall.two.name == name {
+				Ok(Self { one: &marshall.two })
+			} else {
+				Err(DeserializationError::from(DeserializationErrorKind::NoMatch { actual: "todo!".to_string() }))
+			}
+		}
+	}
 
 	#[cfg(feature = "toml")]
 	impl_toml!(TestStruct, ReadableProfile);
@@ -496,6 +504,6 @@ mod tests {
 		};
 		let ser: Vec<u8> = test2.serialize();
 		println!("{:?}", ser);
-		println!("{:?}", TestStruct3::deserialize(ser, &test).unwrap());
+		println!("{:?}", TestStruct3::deserialize::<Vec<u8>, _>(ser, &test).unwrap());
 	}
 }
