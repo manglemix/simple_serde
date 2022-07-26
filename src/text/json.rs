@@ -10,6 +10,60 @@ pub mod json_prelude {
 }
 
 
+fn split_layer(data: String) -> Result<Vec<String>, char> {
+	let mut out = Vec::new();
+	let mut curly_count = 0usize;
+	let mut square_count = 0usize;
+	let mut buffer = String::new();
+
+	for c in data.trim().chars() {
+		if c == '{' {
+			curly_count += 1;
+			if curly_count == 1 {
+				continue
+			}
+
+		} else if c == '}' {
+			if curly_count == 0 {
+				return Err(c)
+			}
+			curly_count -= 1;
+			if curly_count == 0 {
+				continue
+			}
+
+		} else if c == '[' {
+			square_count += 1;
+			if square_count == 1 {
+				continue
+			}
+
+		} else if c == ']' {
+			if square_count == 0 {
+				return Err(c)
+			}
+			square_count -= 1;
+			if square_count == 0 {
+				continue
+			}
+
+		} else if c == ',' && !(square_count > 1 || curly_count > 1) {
+			out.push(buffer.trim().into());
+			buffer.clear();
+			continue
+		}
+
+		buffer.push(c);
+	}
+
+	if !buffer.is_empty() {
+		out.push(buffer.trim().into());
+	}
+
+	Ok(out)
+}
+
+
 impl TextRepr {
 	pub fn to_json(self) -> String {
 		match self {
@@ -35,71 +89,60 @@ impl TextRepr {
 	}
 	pub fn from_json(data: String) -> Result<Self, DeserializationError> {
 		let mut out = Self::new();
-		let mut data: VecDeque<char> = data.chars().collect();
+		let data = data.trim().to_string();
+		let chars: VecDeque<_> = data.char_indices().collect();
 
-		let start_char = match first_symbol(&mut data) {
-			Some(c) => c,
-			None => return Ok(out)
+		let start_char = match chars.front() {
+			Some(c) => c.1,
+			None => return Err(DeserializationError::EOF)
 		};
 
 		if start_char == '{' {
-			'outer: loop {
-				let mut key = String::from(match first_symbol(&mut data) {
-					Some(c) => c,
-					None => continue
-				});
-				loop {
-					let c = match data.pop_front() {
-						Some(c) => c,
-						None => break 'outer
-					};
-					if c == ':' {
-						break
-					}
-					key.push(c);
-				}
-				key = key.trim().to_string();
+			let segments = split_layer(data).map_err(|c| { DeserializationError::invalid_format(format!("Unbalanced braces: {c}")) })?;
 
-				let mut value = String::new();
-				let mut ended = false;
-				loop {
-					let c = match data.pop_front() {
-						Some(c) => c,
-						None => return Err(DeserializationError::new_kind(DeserializationErrorKind::UnexpectedEOF))
-					};
-					if c == ',' {
-						break
-					}
-					if c == '}' {
-						ended = true;
-						break
-					}
-					value.push(c);
+			for segment in segments {
+				if segment.is_empty() {
+					continue
 				}
-				value = value.trim().to_string();
-				out.push_entry(key, Self::from_json(value)?);
-				if ended {
-					break
+				let idx = match segment.find(':') {
+					None => return Err(DeserializationError::invalid_format("missing value").set_field(segment)),
+					Some(x) => x
+				};
+				let (key, value) = segment.split_at(idx);
+
+				let key = key.trim();
+
+				if key.is_empty() {
+					return Err(DeserializationError::invalid_format("missing key"))
 				}
+
+				let value = match value.get(1..) {
+					None => "",
+					Some(x) => x.trim()
+				};
+
+				if value.is_empty() {
+					return Err(DeserializationError::invalid_format("missing value").set_field(key))
+				}
+
+				out.push_entry(key.into(), Self::from_json(value.into())?);
 			}
 
 		} else if start_char == '[' {
-			let mut value = String::new();
-			while let Some(c) = data.pop_front() {
-				if c == ',' {
-					let value = value.trim().to_string();
-					out.push_value(Self::from_json(value)?);
-					continue
+			let segments = split_layer(data).map_err(|c| { DeserializationError::invalid_format(format!("Unbalanced braces: {c}")) })?;
+
+			for segment in segments {
+				let segment = segment.trim().to_string();
+
+				if segment.is_empty() {
+					return Err(DeserializationError::invalid_format("missing array value"))
 				}
-				if c == ']' {
-					break
-				}
-				value.push(c);
+
+				out.push_value(Self::from_json(segment)?);
 			}
 
 		} else {
-			data.push_front(start_char);
-			return Self::from_str_value(data.into_iter().collect())
+			return Self::from_str_value(data)
 		}
 
 		Ok(out)

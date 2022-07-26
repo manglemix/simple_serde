@@ -24,8 +24,10 @@ impl<P, K, V> Deserialize<P> for HashMap<K, V>
 	fn deserialize<T: Serializer>(data: &mut T) -> Result<Self, DeserializationError> {
 		let mut out = Self::new();
 		while let Some(key) = data.try_get_key() {
-			out.insert(K::from(key.clone()), data.deserialize_key(key)?);
+			let deser = data.deserialize_key(key.as_str()).set_field(key.clone())?;
+			out.insert(K::from(key), deser);
 		}
+
 		Ok(out)
 	}
 }

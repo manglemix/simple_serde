@@ -3,8 +3,8 @@ use std::mem::replace;
 
 use super::*;
 
-mod toml;
-mod json;
+pub mod toml;
+pub mod json;
 
 
 pub use toml::toml_prelude;
@@ -39,8 +39,13 @@ impl TextRepr {
 		Self::Empty
 	}
 
-	pub fn is_empty(&self) -> bool {
-		matches!(self, Self::Boolean(_))
+	fn is_empty(&self) -> bool {
+		match self {
+			Self::Empty => true,
+			Self::Table(x) => x.is_empty(),
+			Self::Array(x) => x.is_empty(),
+			_ => false
+		}
 	}
 
 	fn pull_value(&mut self) -> Result<Self, DeserializationErrorKind> {
@@ -212,7 +217,7 @@ impl Serializer for TextRepr {
 	fn deserialize_key<P, T: Deserialize<P>, K: Borrow<str>>(&mut self, key: K) -> Result<T, DeserializationError> {
 		let key: String = key.borrow().into();
 		let mut value = self.pull_entry(key.clone()).set_field(key.clone())?;
-		let result = T::deserialize(&mut value);
+		let result = T::deserialize(&mut value).map_err(|e| { e.nest().set_field(key.clone()) });
 		if !value.is_empty() {
 			self.push_entry(key, value);
 		}

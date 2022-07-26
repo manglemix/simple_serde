@@ -106,7 +106,7 @@ impl TextRepr {
 				outer_path.clear();
 				let mut segment = String::new();
 				loop {
-					let c = data.pop_front().ok_or(DeserializationErrorKind::UnexpectedEOF).no_field()?;
+					let c = data.pop_front().ok_or(DeserializationErrorKind::UnexpectedEOF).set_field("Outer Field Name")?;
 					if c == ']' {
 						break
 					}
@@ -126,7 +126,7 @@ impl TextRepr {
 			}
 			let mut key = String::from(start_char);
 			loop {
-				let c = data.pop_front().ok_or(DeserializationErrorKind::UnexpectedEOF).no_field()?;
+				let c = data.pop_front().ok_or(DeserializationErrorKind::UnexpectedEOF).set_field(key.clone())?;
 				if c == '=' {
 					break
 				}
@@ -149,6 +149,7 @@ impl TextRepr {
 			out.push_entry_path(new_path, Self::from_str_value(value)?);
 		}
 
+		// println!("{:?}", out);
 		Ok(out)
 	}
 }

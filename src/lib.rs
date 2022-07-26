@@ -15,6 +15,9 @@ pub mod prelude {
 	pub use crate::{impl_key_serde, impl_key_ser, impl_key_deser, Serialize, Deserialize, Serializer, DeserializationError, ReadableProfile, EfficientProfile};
 }
 
+#[cfg(feature = "text")]
+pub use text::{json_prelude, toml_prelude, toml, json};
+
 #[derive(Debug, Copy, Clone)]
 pub enum SizeType {
 	U8,
@@ -50,6 +53,13 @@ pub enum DeserializationErrorKind {
 }
 
 
+// impl DeserializationErrorKind {
+// 	pub fn invalid_format<T: ToString>(reason: T) -> Self {
+// 		Self::InvalidFormat { reason: reason.to_string() }
+// 	}
+// }
+
+
 impl From<FromUtf8Error> for DeserializationErrorKind {
 	fn from(e: FromUtf8Error) -> Self {
 		Self::FromUTF8Error(e)
@@ -59,7 +69,7 @@ impl From<FromUtf8Error> for DeserializationErrorKind {
 
 trait DeserializationResult {
 	type Output;
-	fn set_field<T: Into<String>>(self, field: T) -> Self::Output;
+	fn set_field<T: ToString>(self, field: T) -> Self::Output;
 	fn no_field(self) -> Self::Output;
 }
 
@@ -67,10 +77,26 @@ trait DeserializationResult {
 impl<T> DeserializationResult for Result<T, DeserializationErrorKind> {
 	type Output = Result<T, DeserializationError>;
 
-	fn set_field<K: Into<String>>(self, field: K) -> Self::Output {
+	fn set_field<K: ToString>(self, field: K) -> Self::Output {
 		match self {
 			Ok(x) => Ok(x),
 			Err(e) => Err(DeserializationError::new(field, e))
+		}
+	}
+
+	fn no_field(self) -> Self::Output {
+		self.map_err(DeserializationError::new_kind)
+	}
+}
+
+
+impl<T> DeserializationResult for Result<T, DeserializationError> {
+	type Output = Result<T, DeserializationError>;
+
+	fn set_field<K: ToString>(self, field: K) -> Self::Output {
+		match self {
+			Ok(x) => Ok(x),
+			Err(e) => Err(e.set_field(field))
 		}
 	}
 
@@ -89,6 +115,7 @@ pub struct DeserializationError {
 
 impl Debug for DeserializationError {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+
 		match &self.field {
 			None => write!(f, "Faced the following deserialization error: {:?}", self.kind),
 			Some(x) => write!(f, "Faced the following deserialization error on field: {} => {:?}", x, self.kind)
@@ -98,14 +125,26 @@ impl Debug for DeserializationError {
 
 
 impl DeserializationError {
+	const EOF: Self = Self { field: None, kind: DeserializationErrorKind::UnexpectedEOF };
+
 	pub fn new_kind<E: Into<DeserializationErrorKind>>(error: E) -> Self {
 		Self { field: None, kind: error.into() }
 	}
-	pub fn new<T: Into<String>, E: Into<DeserializationErrorKind>>(field: T, error: E) -> Self {
-		Self { field: Some(field.into()), kind: error.into() }
+	pub fn new<T: ToString, E: Into<DeserializationErrorKind>>(field: T, error: E) -> Self {
+		Self { field: Some(field.to_string()), kind: error.into() }
 	}
-	pub fn missing_field<T: Into<String>>(field: T) -> Self {
-		Self { field: Some(field.into()), kind: DeserializationErrorKind::MissingField }
+	pub fn missing_field<T: ToString>(field: T) -> Self {
+		Self { field: Some(field.to_string()), kind: DeserializationErrorKind::MissingField }
+	}
+	pub fn invalid_format<T: ToString>(reason: T) -> Self {
+		Self { field: None, kind: DeserializationErrorKind::InvalidFormat { reason: reason.to_string() } }
+	}
+	pub fn set_field<T: ToString>(mut self, field: T) -> Self {
+		self.field = Some(field.to_string());
+		self
+	}
+	pub fn nest(self) -> Self {
+		Self::new_kind(DeserializationErrorKind::from(self))
 	}
 }
 
@@ -131,7 +170,7 @@ pub trait PrimitiveSerializer {
 
 
 /// A trait for data structures that can serialize or deserialize into other types that implement Serialize or Deserialize respectively
-pub trait Serializer: PrimitiveSerializer {
+pub trait Serializer: PrimitiveSerializer + Debug {
 	fn serialize<P, T: Serialize<P>>(&mut self, item: T);
 	fn serialize_key<P, T: Serialize<P>, K: Borrow<str>>(&mut self, key: K, item: T);
 	fn deserialize<P, T: Deserialize<P>>(&mut self) -> Result<T, DeserializationError>;
@@ -342,6 +381,8 @@ mod tests {
 	impl_bin!(TestStruct, EfficientProfile);
 	#[cfg(feature = "bin")]
 	impl_bin!(TestStruct2, ReadableProfile);
+	#[cfg(feature = "text")]
+	impl_json!(TestStruct2, ReadableProfile);
 
 	#[cfg(feature = "text")]
 	#[test]
@@ -387,9 +428,9 @@ mod tests {
 				age: 2
 			}
 		};
-		let ser = test.serialize_toml();
+		let ser = test.serialize_json();
 		println!("{}", ser);
-		println!("{:?}", TestStruct2::deserialize_toml(ser).unwrap());
+		println!("{:?}", TestStruct2::deserialize_json(ser).unwrap());
 	}
 
 	#[cfg(feature = "bin")]
