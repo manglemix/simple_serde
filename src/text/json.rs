@@ -65,6 +65,9 @@ fn split_layer(data: String) -> Result<Vec<String>, char> {
 
 
 impl TextRepr {
+	pub fn is_valid_json<T: ToString>(data: T) -> bool {
+		Self::from_json(data.to_string()).is_ok()
+	}
 	pub fn to_json(self) -> String {
 		match self {
 			TextRepr::Empty => String::new(),

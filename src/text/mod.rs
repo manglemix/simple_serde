@@ -6,7 +6,6 @@ use super::*;
 pub mod toml;
 pub mod json;
 
-
 pub use toml::toml_prelude;
 pub use json::json_prelude;
 
@@ -39,7 +38,7 @@ impl TextRepr {
 		Self::Empty
 	}
 
-	fn is_empty(&self) -> bool {
+	pub fn is_empty(&self) -> bool {
 		match self {
 			Self::Empty => true,
 			Self::Table(x) => x.is_empty(),
@@ -48,7 +47,7 @@ impl TextRepr {
 		}
 	}
 
-	fn pull_value(&mut self) -> Result<Self, DeserializationErrorKind> {
+	pub fn pull_value(&mut self) -> Result<Self, DeserializationErrorKind> {
 		match self {
 			TextRepr::Array(x) => x.pop_front().ok_or(DeserializationErrorKind::UnexpectedEOF),
 			TextRepr::Table(_) => Err(DeserializationErrorKind::InvalidType { expected: "non-table", actual: "table" }),
@@ -56,7 +55,7 @@ impl TextRepr {
 		}
 	}
 
-	fn pull_entry<T: Borrow<String>>(&mut self, key: T) -> Result<Self, DeserializationErrorKind> {
+	pub fn pull_entry<T: Borrow<String>>(&mut self, key: T) -> Result<Self, DeserializationErrorKind> {
 		match self {
 			TextRepr::Table(x) => x.remove(key.borrow()).ok_or(DeserializationErrorKind::MissingField),
 			_ => Err(DeserializationErrorKind::InvalidType { expected: "table", actual: "non-table" })

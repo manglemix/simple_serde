@@ -39,6 +39,9 @@ fn map_entries_recursive(map: HashMap<String, TextRepr>, root: Vec<String>, entr
 
 
 impl TextRepr {
+	pub fn is_valid_toml<T: ToString>(data: T) -> bool {
+		Self::from_toml(data.to_string()).is_ok()
+	}
 	pub fn to_toml(self) -> String {
 		match self {
 			TextRepr::Empty => String::new(),
@@ -149,7 +152,6 @@ impl TextRepr {
 			out.push_entry_path(new_path, Self::from_str_value(value)?);
 		}
 
-		// println!("{:?}", out);
 		Ok(out)
 	}
 }

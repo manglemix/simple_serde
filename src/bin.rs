@@ -4,18 +4,19 @@ use super::*;
 
 pub mod prelude {
 	pub use super::{BinSerialize, BinDeserialize};
+	pub use crate::{impl_bin, impl_bin_ser, impl_bin_deser};
 }
 
 
 type Binary = VecDeque<u8>;
 
 
-pub trait BinSerialize {
+pub trait BinSerialize<P=NaturalProfile> {
 	fn serialize_bin(self) -> Vec<u8>;
 }
 
 
-pub trait BinDeserialize: Sized {
+pub trait BinDeserialize<P=NaturalProfile>: Sized {
 	fn deserialize_bin(data: Vec<u8>) -> Result<Self, DeserializationError>;
 }
 
@@ -45,14 +46,54 @@ impl<Marshall, T: MarshalledBinSerialize<Marshall> + MarshalledBinDeserialize<Ma
 #[macro_export]
 macro_rules! impl_bin {
     ($name: ty, $profile: ty) => {
-		impl BinSerialize for $name {
+		impl_bin_ser!($name, $profile);
+		impl_bin_deser!($name, $profile);
+	};
+    // ($name: ty, $profile: ty, $marshall: ty) => {
+	// 	impl MarshalledBinSerde for $name {
+	// 		fn serialize_bin(self, marshall: &$marshall) -> Vec<u8> {
+	// 			let mut out = Vec::new();
+	// 			MarshalledSerialize::<$profile>::serialize(self, &mut out, marshall);
+	// 			out
+	// 		}
+	// 		fn deserialize_bin(data: Vec<u8>, marshall: &$marshall) -> Result<Self, DeserializationError> {
+	// 			MarshalledDeserialize::<$profile>::deserialize(&mut data, marshall)
+	// 		}
+	// 	}
+	// };
+}
+
+
+#[macro_export]
+macro_rules! impl_bin_ser {
+    ($name: ty, $profile: ty) => {
+		impl BinSerialize<$profile> for $name {
 			fn serialize_bin(self) -> Vec<u8> {
 				let mut out = std::collections::VecDeque::<u8>::new();
 				Serialize::<$profile>::serialize(self, &mut out);
 				out.into()
 			}
 		}
-		impl BinDeserialize for $name {
+	};
+    // ($name: ty, $profile: ty, $marshall: ty) => {
+	// 	impl MarshalledBinSerde for $name {
+	// 		fn serialize_bin(self, marshall: &$marshall) -> Vec<u8> {
+	// 			let mut out = Vec::new();
+	// 			MarshalledSerialize::<$profile>::serialize(self, &mut out, marshall);
+	// 			out
+	// 		}
+	// 		fn deserialize_bin(data: Vec<u8>, marshall: &$marshall) -> Result<Self, DeserializationError> {
+	// 			MarshalledDeserialize::<$profile>::deserialize(&mut data, marshall)
+	// 		}
+	// 	}
+	// };
+}
+
+
+#[macro_export]
+macro_rules! impl_bin_deser {
+    ($name: ty, $profile: ty) => {
+		impl BinDeserialize<$profile> for $name {
 			fn deserialize_bin(data: Vec<u8>) -> Result<Self, DeserializationError> {
 				Deserialize::<$profile>::deserialize(&mut Into::<std::collections::VecDeque<u8>>::into(data))
 			}
@@ -95,15 +136,15 @@ fn size_to_bytes(size: usize, size_type: SizeType) -> Binary {
 		SizeType::U8 => vec![size as u8].into(),
 		SizeType::U16 => (size as u16).to_bin(),
 		SizeType::U32 => (size as u32).to_bin(),
-	}.into()
+	}
 }
 
 
 fn bytes_to_size(bytes: &mut Binary, size_type: SizeType) -> Result<usize, DeserializationErrorKind> {
 	match size_type {
 		SizeType::U8 => Ok(bytes.pop_front().ok_or(DeserializationErrorKind::UnexpectedEOF)? as usize),
-		SizeType::U16 => Ok(u16::from_bin(bytes.into())? as usize),
-		SizeType::U32 => Ok(u32::from_bin(bytes.into())? as usize),
+		SizeType::U16 => Ok(u16::from_bin(bytes)? as usize),
+		SizeType::U32 => Ok(u32::from_bin(bytes)? as usize),
 	}
 }
 
@@ -113,12 +154,10 @@ fn bytes_to_size(bytes: &mut Binary, size_type: SizeType) -> Result<usize, Deser
 fn find_key<K: Borrow<str>>(bytes: &[u8], key: K) -> Option<usize> {
 	let key_bytes = key.borrow().as_bytes();
 	let bytes_len = key_bytes.len();
-	let mut i = 0usize;
-	for window in bytes.windows(bytes_len) {
+	for (i, window) in bytes.windows(bytes_len).enumerate() {
 		if window == key_bytes {
 			return Some(i + bytes_len)
 		}
-		i += 1;
 	}
 	None
 }
@@ -156,7 +195,6 @@ fn key_deserialize<T, K, F>(bytes: &mut Binary, key: K, f: F) -> Result<T, Deser
 	Ok(item)
 }
 
-
 impl PrimitiveSerializer for Binary {
 	fn serialize_bool(&mut self, boolean: bool) {
 		self.push_back(255 * boolean as u8);
@@ -166,7 +204,7 @@ impl PrimitiveSerializer for Binary {
 		if self.is_empty() {
 			return Err(DeserializationError::new_kind(DeserializationErrorKind::UnexpectedEOF))
 		}
-		match self.pop_front().ok_or(DeserializationError::new_kind(DeserializationErrorKind::UnexpectedEOF))? {
+		match self.pop_front().ok_or_else(|| DeserializationError::new_kind(DeserializationErrorKind::UnexpectedEOF))? {
 			255 => Ok(true),
 			0 => Ok(false),
 			x => Err(DeserializationError::new_kind(DeserializationErrorKind::NoMatch { actual: x.to_string() }))

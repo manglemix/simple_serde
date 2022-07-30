@@ -17,6 +17,8 @@ pub mod prelude {
 
 #[cfg(feature = "text")]
 pub use text::{json_prelude, toml_prelude, toml, json};
+#[cfg(feature = "bin")]
+pub use bin::prelude as bin_prelude;
 
 #[derive(Debug, Copy, Clone)]
 pub enum SizeType {
