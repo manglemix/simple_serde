@@ -177,9 +177,9 @@ pub trait Serializer: PrimitiveSerializer + Debug {
 	fn serialize_key<P, T: Serialize<P>, K: Borrow<str>>(&mut self, key: K, item: T);
 	fn deserialize<P, T: Deserialize<P>>(&mut self) -> Result<T, DeserializationError>;
 	fn deserialize_key<P, T: Deserialize<P>, K: Borrow<str>>(&mut self, key: K) -> Result<T, DeserializationError>;
-	fn deserialize_key_or<P, T: Deserialize<P>, K: Borrow<str>>(&mut self, key: K, or: T) -> Result<T, DeserializationError> {
+	fn deserialize_key_or<P, T: Deserialize<P>, K: Borrow<str>, V: Into<T>>(&mut self, key: K, or: V) -> Result<T, DeserializationError> {
 		self.deserialize_key(key).or_else(|e| match &e.kind {
-			DeserializationErrorKind::MissingField => Ok(or),
+			DeserializationErrorKind::MissingField => Ok(or.into()),
 			_ => Err(e)
 		})
 	}
@@ -190,12 +190,6 @@ pub trait Serializer: PrimitiveSerializer + Debug {
 	{
 		self.deserialize_key(key).or_else(|e| match &e.kind {
 			DeserializationErrorKind::MissingField => Ok(or()),
-			_ => Err(e)
-		})
-	}
-	fn deserialize_key_or_into<P, T: Deserialize<P>, K: Borrow<str>, I: Into<T>>(&mut self, key: K, or: I) -> Result<T, DeserializationError> {
-		self.deserialize_key(key).or_else(|e| match &e.kind {
-			DeserializationErrorKind::MissingField => Ok(or.into()),
 			_ => Err(e)
 		})
 	}
