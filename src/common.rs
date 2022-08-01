@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use super::*;
 
@@ -33,7 +33,7 @@ impl<P, K, V> Deserialize<P> for HashMap<K, V>
 }
 
 
-impl<V: Serialize> Serialize for Vec<V> {
+impl<P, V: Serialize<P>> Serialize<P> for Vec<V> {
 	fn serialize<T: Serializer>(self, data: &mut T) {
 		for item in self {
 			data.serialize(item);
@@ -42,7 +42,7 @@ impl<V: Serialize> Serialize for Vec<V> {
 }
 
 
-impl<V: Deserialize> Deserialize for Vec<V> {
+impl<P, V: Deserialize<P>> Deserialize<P> for Vec<V> {
 	fn deserialize<T: Serializer>(data: &mut T) -> Result<Self, DeserializationError> {
 		let data_ref = data.borrow_mut();
 		let mut out = Self::new();
@@ -54,6 +54,33 @@ impl<V: Deserialize> Deserialize for Vec<V> {
 					_ => return Err(e)
 				}
 			}
+		}
+		Ok(out)
+	}
+}
+
+
+impl<P, V: Serialize<P> + Eq + Hash> Serialize<P> for HashSet<V> {
+	fn serialize<T: Serializer>(self, data: &mut T) {
+		for item in self {
+			data.serialize(item);
+		}
+	}
+}
+
+
+impl<P, V: Deserialize<P> + Eq + Hash> Deserialize<P> for HashSet<V> {
+	fn deserialize<T: Serializer>(data: &mut T) -> Result<Self, DeserializationError> {
+		let data_ref = data.borrow_mut();
+		let mut out = Self::new();
+		loop {
+			match data_ref.deserialize() {
+				Ok(x) => out.insert(x),
+				Err(e) => match &e.kind {
+					DeserializationErrorKind::UnexpectedEOF => break,
+					_ => return Err(e)
+				}
+			};
 		}
 		Ok(out)
 	}

@@ -38,6 +38,25 @@ fn map_entries_recursive(map: HashMap<String, TextRepr>, root: Vec<String>, entr
 }
 
 
+fn delimit_comma_split(data: &str) -> Vec<String> {
+	let mut in_string = false;
+	let mut item = String::new();
+	let mut out = Vec::new();
+
+	for c in data.chars() {
+		if c == '"' {
+			in_string = !in_string;
+		} else if !in_string && c == ',' {
+			out.push(item.clone());
+			item.clear();
+		}
+		item.push(c);
+	}
+
+	out
+}
+
+
 impl TextRepr {
 	pub fn is_valid_toml<T: ToString>(data: T) -> bool {
 		Self::from_toml(data.to_string()).is_ok()
@@ -149,7 +168,16 @@ impl TextRepr {
 			let mut new_path = outer_path.clone();
 			new_path.push(key);
 			new_path.reverse();
-			out.push_entry_path(new_path, Self::from_str_value(value)?);
+
+			if value.starts_with('[') {
+				let mut arr = VecDeque::new();
+				for item in delimit_comma_split(value.get(1..(value.len() - 1)).unwrap()) {
+					arr.push_back(Self::from_str_value(item.trim().to_string())?);
+				}
+				out.push_entry_path(new_path, Self::Array(arr))
+			} else {
+				out.push_entry_path(new_path, Self::from_str_value(value)?);
+			}
 		}
 
 		Ok(out)
