@@ -1,4 +1,5 @@
 use std::borrow::{Borrow, BorrowMut};
+use std::collections::VecDeque;
 use std::fmt::{Debug, Formatter};
 use std::string::FromUtf8Error;
 
@@ -168,6 +169,9 @@ pub trait PrimitiveSerializer {
 
 	fn serialize_string<T: Into<String>>(&mut self, string: T);
 	fn deserialize_string(&mut self) -> Result<String, DeserializationError>;
+
+	fn serialize_bytes<T: Into<VecDeque<u8>>>(&mut self, bytes: T);
+	fn deserialize_bytes<T: FromIterator<u8>>(&mut self) -> Result<T, DeserializationError>;
 }
 
 

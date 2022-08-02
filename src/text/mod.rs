@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::hint;
 use std::mem::replace;
 
 use super::*;
@@ -179,6 +180,35 @@ impl PrimitiveSerializer for TextRepr {
 		match self.pull_value().no_field()? {
 			TextRepr::String(x) => Ok(x),
 			_ => Err(DeserializationError::new_kind(DeserializationErrorKind::InvalidType { expected: "string", actual: "todo!" }))
+		}
+	}
+
+	fn serialize_bytes<T: Into<VecDeque<u8>>>(&mut self, bytes: T) {
+		let bytes = bytes.into();
+		self.push_value(Self::Array(bytes.into_iter().map(|x| Self::Integer(x as i64)).collect()));
+	}
+
+	fn deserialize_bytes<T: FromIterator<u8>>(&mut self) -> Result<T, DeserializationError> {
+		unsafe {
+			match self {
+				Self::Array(_) => {
+					let values = match replace(self, Self::Empty) {
+						Self::Array(arr) => arr,
+						_ => hint::unreachable_unchecked()
+					};
+					let mut out = Vec::with_capacity(values.len());
+
+					for value in values {
+						match value {
+							Self::Integer(x) => out.push(x as u8),
+							_ => return Err(DeserializationError::new_kind(DeserializationErrorKind::InvalidType { expected: "byte", actual: "todo!" }))
+						}
+					}
+
+					Ok(out.into_iter().collect())
+				},
+				_ => Err(DeserializationError::new_kind(DeserializationErrorKind::InvalidType { expected: "array", actual: "todo!" }))
+			}
 		}
 	}
 }

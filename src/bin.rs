@@ -229,6 +229,17 @@ impl PrimitiveSerializer for Binary {
 		let size = bytes_to_size(self, SizeType::U32).no_field()?;
 		String::from_utf8(split_first_vec(self, size).no_field()?.into()).map_err(|e| { DeserializationError::new_kind(DeserializationErrorKind::FromUTF8Error(e)) })
 	}
+
+	fn serialize_bytes<T: Into<VecDeque<u8>>>(&mut self, bytes: T) {
+		let mut bytes = bytes.into();
+		self.serialize_num(bytes.len() as u32);
+		self.append(&mut bytes);
+	}
+
+	fn deserialize_bytes<T: FromIterator<u8>>(&mut self) -> Result<T, DeserializationError> {
+		let size = self.deserialize_num::<u32>()? as usize;
+		Ok(self.drain(0..size).collect())
+	}
 }
 
 
