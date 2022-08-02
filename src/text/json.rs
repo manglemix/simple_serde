@@ -101,6 +101,12 @@ impl TextRepr {
 		};
 
 		if start_char == '{' {
+			unsafe {
+				if chars.back().unwrap_unchecked().1 != '}' {
+					return Err(DeserializationError::invalid_format("missing closing brace"))
+				}
+			}
+
 			let segments = split_layer(data).map_err(|c| { DeserializationError::invalid_format(format!("Unbalanced braces: {c}")) })?;
 
 			for segment in segments {
