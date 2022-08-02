@@ -4,22 +4,21 @@ use std::fmt::{Debug, Formatter};
 use std::string::FromUtf8Error;
 
 #[cfg(feature = "bin")]
+pub use bin::prelude as bin_prelude;
+pub use primitives::NumberType;
+#[cfg(feature = "text")]
+pub use text::{json, json_prelude, toml, toml_prelude};
+
+#[cfg(feature = "bin")]
 pub mod bin;
 pub mod common;
 mod primitives;
 #[cfg(feature = "text")]
 pub mod text;
 
-pub use primitives::{NumberType};
-
 pub mod prelude {
-	pub use crate::{impl_key_serde, impl_key_ser, impl_key_deser, Serialize, Deserialize, Serializer, DeserializationError, ReadableProfile, EfficientProfile};
+	pub use crate::{DeserializationError, Deserialize, EfficientProfile, impl_key_deser, impl_key_ser, impl_key_serde, ReadableProfile, Serialize, Serializer};
 }
-
-#[cfg(feature = "text")]
-pub use text::{json_prelude, toml_prelude, toml, json};
-#[cfg(feature = "bin")]
-pub use bin::prelude as bin_prelude;
 
 #[derive(Debug, Copy, Clone)]
 pub enum SizeType {
@@ -118,7 +117,6 @@ pub struct DeserializationError {
 
 impl Debug for DeserializationError {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-
 		match &self.field {
 			None => write!(f, "Faced the following deserialization error: {:?}", self.kind),
 			Some(x) => write!(f, "Faced the following deserialization error on field: {} => {:?}", x, self.kind)
@@ -231,18 +229,22 @@ pub trait MarshalledDeserialize<'a, ProfileMarker, Marshall>: Sized {
 /// A marker trait for types that can be serialized and deserialized with the same profile,
 /// without a marshall. Is automatically implemented on all appropriate types
 pub trait Serde<ProfileMarker>: Serialize<ProfileMarker> + Deserialize<ProfileMarker> {}
+
 impl<P, T: Serialize<P> + Deserialize<P>> Serde<P> for T {}
 
 /// A marker trait for types that can be serialized and deserialized with the same profile,
 /// and the same type of marshall. Is automatically implemented on all appropriate types
 pub trait MarshalledSerde<'a, ProfileMarker, Marshall>: MarshalledSerialize<ProfileMarker, Marshall> + MarshalledDeserialize<'a, ProfileMarker, Marshall> {}
+
 impl<'a, P, M, T: MarshalledSerialize<P, M> + MarshalledDeserialize<'a, P, M>> MarshalledSerde<'a, P, M> for T {}
 
 /// A marker type for serialization and deserialization of data.
 /// the default way that a type should be serialized. Mainly used for common types like ints, String, etc
 pub struct NaturalProfile;
+
 /// A marker type for serialization and deserialization of human readable data
 pub struct ReadableProfile;
+
 /// A marker type for serialization and deserialization of memory/processor efficient data
 pub struct EfficientProfile;
 
@@ -290,15 +292,16 @@ macro_rules! impl_key_deser {
 #[cfg(test)]
 mod tests {
 	use std::collections::VecDeque;
+
+	use crate::{DeserializationErrorKind, MarshalledDeserialize, prelude::*};
 	#[cfg(feature = "bin")]
-	use crate::bin::{BinSerialize, BinDeserialize};
+	use crate::bin::{BinDeserialize, BinSerialize};
 	#[cfg(feature = "bin")]
 	use crate::impl_bin;
-	use crate::{prelude::*, DeserializationErrorKind, MarshalledDeserialize};
 	#[cfg(feature = "text")]
-	use crate::text::{toml_prelude::*, json_prelude::*};
+	use crate::text::{json_prelude::*, toml_prelude::*};
 
-    #[derive(Debug)]
+	#[derive(Debug)]
 	struct TestStruct {
 		name: String,
 		id: String,
@@ -362,7 +365,7 @@ mod tests {
 		fn deserialize<T: Serializer>(data: &mut T, marshall: &'a TestStruct2) -> Result<Self, DeserializationError> {
 			let name: String = data.deserialize_key("name")?;
 			if marshall.one.name == name {
-				Ok(Self{ one: &marshall.one })
+				Ok(Self { one: &marshall.one })
 			} else if marshall.two.name == name {
 				Ok(Self { one: &marshall.two })
 			} else {

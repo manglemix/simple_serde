@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
-use crate::text::TextRepr;
-use super::{Serialize, Serializer, Deserialize, DeserializationError};
 
+use crate::text::TextRepr;
+
+use super::{DeserializationError, Deserialize, Serialize, Serializer};
 #[cfg(feature = "bin")]
 use super::{bin, DeserializationErrorKind};
-
 
 /// Trait for types that are either integers or floats
 pub trait NumberType: Sized {

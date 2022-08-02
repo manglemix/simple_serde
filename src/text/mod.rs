@@ -2,14 +2,14 @@ use std::collections::{HashMap, VecDeque};
 use std::hint;
 use std::mem::replace;
 
+pub use json::json_prelude;
+use serialize_owned;
+pub use toml::toml_prelude;
+
 use super::*;
 
 pub mod toml;
 pub mod json;
-
-pub use toml::toml_prelude;
-pub use json::json_prelude;
-
 
 #[derive(Debug)]
 pub enum TextRepr {
@@ -221,9 +221,6 @@ macro_rules! serialize_owned {
 		owner
 	}};
 }
-
-use serialize_owned;
-
 
 impl Serializer for TextRepr {
 	fn serialize<P, T: Serialize<P>>(&mut self, item: T) {

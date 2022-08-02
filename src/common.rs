@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
-use super::*;
 
+use super::*;
 
 impl<P, K, V> Serialize<P> for HashMap<K, V>
 	where

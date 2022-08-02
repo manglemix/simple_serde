@@ -3,13 +3,13 @@ use std::fmt::Write;
 
 use super::*;
 
-
 const AVG_TOML_LINE_LENGTH: usize = 30;
 
 
 pub mod toml_prelude {
-	pub use super::{TOMLSerialize, TOMLDeserialize, text::TextRepr};
-	pub use crate::{impl_toml, impl_toml_ser, impl_toml_deser};
+	pub use crate::{impl_toml, impl_toml_deser, impl_toml_ser};
+
+	pub use super::{text::TextRepr, TOMLDeserialize, TOMLSerialize};
 }
 
 
@@ -185,35 +185,37 @@ impl TextRepr {
 }
 
 
-pub trait TOMLSerialize<P=NaturalProfile> {
+pub trait TOMLSerialize<P = NaturalProfile> {
 	fn serialize_toml(self) -> String;
 }
 
 
-pub trait TOMLDeserialize<P=NaturalProfile>: Sized {
+pub trait TOMLDeserialize<P = NaturalProfile>: Sized {
 	fn deserialize_toml(data: String) -> Result<Self, DeserializationError>;
 }
 
 
 /// A marker trait for types that can be serialized and deserialized into TOML with the same profile,
 /// without a marshall. Is automatically implemented on all appropriate types
-pub trait TOMLSerde<P=NaturalProfile>: TOMLSerialize<P> + TOMLDeserialize<P> {}
+pub trait TOMLSerde<P = NaturalProfile>: TOMLSerialize<P> + TOMLDeserialize<P> {}
+
 impl<P, T: TOMLSerialize<P> + TOMLDeserialize<P>> TOMLSerde<P> for T {}
 
 
-pub trait MarshalledTOMLSerialize<Marshall, P=NaturalProfile> {
+pub trait MarshalledTOMLSerialize<Marshall, P = NaturalProfile> {
 	fn serialize_toml(self, marshall: &Marshall) -> String;
 }
 
 
-pub trait MarshalledTOMLDeserialize<'a, Marshall, P=NaturalProfile>: Sized {
+pub trait MarshalledTOMLDeserialize<'a, Marshall, P = NaturalProfile>: Sized {
 	fn deserialize_toml(data: String, marshall: &'a Marshall) -> Result<Self, DeserializationError>;
 }
 
 
 /// A marker trait for types that can be serialized and deserialized into TOML with the same profile,
 /// and the same type of marshall. Is automatically implemented on all appropriate types
-pub trait MarshalledTOMLSerde<'a, Marshall, P=NaturalProfile>: MarshalledTOMLSerialize<Marshall, P> + MarshalledTOMLDeserialize<'a, Marshall, P> {}
+pub trait MarshalledTOMLSerde<'a, Marshall, P = NaturalProfile>: MarshalledTOMLSerialize<Marshall, P> + MarshalledTOMLDeserialize<'a, Marshall, P> {}
+
 impl<'a, P, Marshall, T: MarshalledTOMLSerialize<Marshall, P> + MarshalledTOMLDeserialize<'a, Marshall, P>> MarshalledTOMLSerde<'a, Marshall, P> for T {}
 
 #[macro_export]

@@ -1,12 +1,13 @@
 use std::collections::{HashMap, VecDeque};
-use std::ops::Add;
 use std::fmt::Write;
+use std::ops::Add;
 
 use super::*;
 
 pub mod json_prelude {
-	pub use super::{JSONSerialize, JSONDeserialize, text::TextRepr};
-	pub use crate::{impl_json, impl_json_ser, impl_json_deser};
+	pub use crate::{impl_json, impl_json_deser, impl_json_ser};
+
+	pub use super::{JSONDeserialize, JSONSerialize, text::TextRepr};
 }
 
 
@@ -22,7 +23,6 @@ fn split_layer(data: String) -> Result<Vec<String>, char> {
 			if curly_count == 1 {
 				continue
 			}
-
 		} else if c == '}' {
 			if curly_count == 0 {
 				return Err(c)
@@ -31,13 +31,11 @@ fn split_layer(data: String) -> Result<Vec<String>, char> {
 			if curly_count == 0 {
 				continue
 			}
-
 		} else if c == '[' {
 			square_count += 1;
 			if square_count == 1 {
 				continue
 			}
-
 		} else if c == ']' {
 			if square_count == 0 {
 				return Err(c)
@@ -46,7 +44,6 @@ fn split_layer(data: String) -> Result<Vec<String>, char> {
 			if square_count == 0 {
 				continue
 			}
-
 		} else if c == ',' && !(square_count > 1 || curly_count > 1) {
 			out.push(buffer.trim().into());
 			buffer.clear();
@@ -136,7 +133,6 @@ impl TextRepr {
 
 				out.push_entry(key.into(), Self::from_json(value.into())?);
 			}
-
 		} else if start_char == '[' {
 			let segments = split_layer(data).map_err(|c| { DeserializationError::invalid_format(format!("Unbalanced braces: {c}")) })?;
 
@@ -149,7 +145,6 @@ impl TextRepr {
 
 				out.push_value(Self::from_json(segment)?);
 			}
-
 		} else {
 			return Self::from_str_value(data)
 		}
@@ -159,28 +154,29 @@ impl TextRepr {
 }
 
 
-pub trait JSONSerialize<P=NaturalProfile> {
+pub trait JSONSerialize<P = NaturalProfile> {
 	fn serialize_json(self) -> String;
 }
 
 
-pub trait JSONDeserialize<P=NaturalProfile>: Sized {
+pub trait JSONDeserialize<P = NaturalProfile>: Sized {
 	fn deserialize_json(data: String) -> Result<Self, DeserializationError>;
 }
 
 
 /// A marker trait for types that can be serialized and deserialized into JSON with the same profile,
 /// without a marshall. Is automatically implemented on all appropriate types
-pub trait JSONSerde<P=NaturalProfile>: JSONSerialize<P> + JSONDeserialize<P> {}
+pub trait JSONSerde<P = NaturalProfile>: JSONSerialize<P> + JSONDeserialize<P> {}
+
 impl<P, T: JSONSerialize<P> + JSONDeserialize<P>> JSONSerde<P> for T {}
 
 
-pub trait MarshalledJSONSerialize<Marshall, P=NaturalProfile> {
+pub trait MarshalledJSONSerialize<Marshall, P = NaturalProfile> {
 	fn serialize_json(self, marshall: &Marshall) -> String;
 }
 
 
-pub trait MarshalledJSONDeserialize<'a, Marshall, P=NaturalProfile>: Sized {
+pub trait MarshalledJSONDeserialize<'a, Marshall, P = NaturalProfile>: Sized {
 	fn deserialize_json(data: String, marshall: &'a Marshall) -> Result<Self, DeserializationError>;
 }
 

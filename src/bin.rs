@@ -1,22 +1,23 @@
 use std::collections::VecDeque;
+
 use super::*;
 
-
 pub mod prelude {
-	pub use super::{BinSerialize, BinDeserialize};
-	pub use crate::{impl_bin, impl_bin_ser, impl_bin_deser};
+	pub use crate::{impl_bin, impl_bin_deser, impl_bin_ser};
+
+	pub use super::{BinDeserialize, BinSerialize};
 }
 
 
 type Binary = VecDeque<u8>;
 
 
-pub trait BinSerialize<P=NaturalProfile> {
+pub trait BinSerialize<P = NaturalProfile> {
 	fn serialize_bin(self) -> Vec<u8>;
 }
 
 
-pub trait BinDeserialize<P=NaturalProfile>: Sized {
+pub trait BinDeserialize<P = NaturalProfile>: Sized {
 	fn deserialize_bin(data: Vec<u8>) -> Result<Self, DeserializationError>;
 }
 
@@ -24,6 +25,7 @@ pub trait BinDeserialize<P=NaturalProfile>: Sized {
 /// A marker trait for types that can be serialized and deserialized into Binary with the same profile,
 /// without a marshall. Is automatically implemented on all appropriate types
 pub trait BinSerde: BinSerialize + BinDeserialize {}
+
 impl<T: BinSerialize + BinDeserialize> BinSerde for T {}
 
 
@@ -40,6 +42,7 @@ pub trait MarshalledBinDeserialize<Marshall>: Sized {
 /// A marker trait for types that can be serialized and deserialized into TOML with the same profile,
 /// and the same type of marshall. Is automatically implemented on all appropriate types
 pub trait MarshalledBinSerde<Marshall>: MarshalledBinSerialize<Marshall> + MarshalledBinDeserialize<Marshall> {}
+
 impl<Marshall, T: MarshalledBinSerialize<Marshall> + MarshalledBinDeserialize<Marshall>> MarshalledBinSerde<Marshall> for T {}
 
 
@@ -241,15 +244,6 @@ impl PrimitiveSerializer for Binary {
 		Ok(self.drain(0..size).collect())
 	}
 }
-
-
-// macro_rules! serialize_owned {
-//     ($item: expr) => {{
-// 		let mut owner = Vec::<u8>::new();
-// 		$item.serialize(&mut owner);
-// 		owner
-// 	}};
-// }
 
 
 impl Serializer for Binary {
