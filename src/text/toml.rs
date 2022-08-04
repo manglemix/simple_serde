@@ -3,7 +3,7 @@ use std::fmt::Write;
 
 use super::*;
 
-const AVG_TOML_LINE_LENGTH: usize = 30;
+pub(crate) const AVG_TOML_LINE_LENGTH: usize = 30;
 
 
 pub mod toml_prelude {
@@ -13,7 +13,7 @@ pub mod toml_prelude {
 }
 
 
-fn map_entries_recursive(map: HashMap<String, TextRepr>, root: Vec<String>, entries: &mut HashMap<Vec<String>, HashMap<String, TextRepr>>) {
+pub(crate) fn map_entries_recursive(map: HashMap<String, TextRepr>, root: Vec<String>, entries: &mut HashMap<Vec<String>, HashMap<String, TextRepr>>) {
 	for (key, value) in map {
 		match value {
 			TextRepr::Table(x) => {
@@ -38,7 +38,7 @@ fn map_entries_recursive(map: HashMap<String, TextRepr>, root: Vec<String>, entr
 }
 
 
-fn delimit_comma_split(data: &str) -> Vec<String> {
+pub(crate) fn delimit_comma_split(data: &str) -> Vec<String> {
 	let mut in_string = false;
 	let mut item = String::new();
 	let mut out = Vec::new();

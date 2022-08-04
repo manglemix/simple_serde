@@ -3,13 +3,25 @@ use std::hint;
 use std::mem::replace;
 
 pub use json::json_prelude;
-use serialize_owned;
 pub use toml::toml_prelude;
 
 use super::*;
 
 pub mod toml;
 pub mod json;
+pub mod mlist;
+
+
+macro_rules! serialize_owned {
+    ($item: expr) => {{
+		let mut owner = TextRepr::new();
+		$item.serialize(&mut owner);
+		owner
+	}};
+}
+
+use serialize_owned;
+
 
 #[derive(Debug)]
 pub enum TextRepr {

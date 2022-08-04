@@ -297,7 +297,7 @@ mod tests {
 	#[cfg(feature = "bin")]
 	use crate::bin::{BinDeserialize, BinSerialize};
 	#[cfg(feature = "bin")]
-	use crate::impl_bin;
+	use crate::bin_prelude::*;
 	#[cfg(feature = "text")]
 	use crate::text::{json_prelude::*, toml_prelude::*};
 
