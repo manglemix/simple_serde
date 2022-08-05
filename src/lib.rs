@@ -1,13 +1,14 @@
 use std::borrow::{Borrow, BorrowMut};
 use std::collections::VecDeque;
 use std::fmt::{Debug, Formatter};
+use std::str::FromStr;
 use std::string::FromUtf8Error;
 
 #[cfg(feature = "bin")]
 pub use bin::prelude as bin_prelude;
 pub use primitives::NumberType;
 #[cfg(feature = "text")]
-pub use text::{json, json_prelude, toml, toml_prelude};
+pub use text::{json, json_prelude, toml, toml_prelude, mlist, mlist_prelude};
 
 #[cfg(feature = "bin")]
 pub mod bin;
@@ -51,15 +52,16 @@ pub enum DeserializationErrorKind {
 	Nested(Box<DeserializationError>),
 	InvalidFormat {
 		reason: String
-	}
+	},
+	FromStrError(String)
 }
 
 
-// impl DeserializationErrorKind {
-// 	pub fn invalid_format<T: ToString>(reason: T) -> Self {
-// 		Self::InvalidFormat { reason: reason.to_string() }
-// 	}
-// }
+impl DeserializationErrorKind {
+	pub fn from_str_err<E: Debug>(err: E) -> Self {
+		Self::FromStrError(format!("{:?}", err))
+	}
+}
 
 
 impl From<FromUtf8Error> for DeserializationErrorKind {
@@ -196,7 +198,7 @@ pub trait Serializer: PrimitiveSerializer + Debug {
 		})
 	}
 	/// Try to get a key if it is the next item
-	fn try_get_key(&mut self) -> Option<String>;
+	fn try_get_key<K: FromStr>(&mut self) -> Option<K>;
 }
 
 

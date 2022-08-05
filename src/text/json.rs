@@ -1,6 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Write;
 use std::ops::Add;
+use std::str::FromStr;
 
 use super::*;
 
@@ -255,7 +256,7 @@ impl<P, K: Borrow<str> + Eq + std::hash::Hash, V: Serialize<P>> JSONSerialize<P>
 }
 
 
-impl<P, K: Eq + std::hash::Hash + From<String>, V: Deserialize<P>> JSONDeserialize<P> for HashMap<K, V> {
+impl<E: Debug, P, K: Eq + std::hash::Hash + FromStr<Err=E>, V: Deserialize<P>> JSONDeserialize<P> for HashMap<K, V> {
 	fn deserialize_json(data: String) -> Result<Self, DeserializationError> {
 		Self::deserialize::<TextRepr>(&mut TextRepr::from_json(data)?)
 	}

@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::str::FromStr;
 
 use super::*;
 
@@ -249,13 +250,11 @@ impl PrimitiveSerializer for Binary {
 impl Serializer for Binary {
 	fn serialize<P, T: Serialize<P>>(&mut self, item: T) {
 		item.serialize(self);
-		// self.append(&mut item.serialize());
 	}
 
 	fn serialize_key<P, T: Serialize<P>, K: Borrow<str>>(&mut self, key: K, item: T) {
-		self.append(&mut key.borrow().as_bytes().to_vec().into());
+		self.append(&mut key.borrow().to_string().as_bytes().to_vec().into());
 		item.serialize(self);
-		// self.append(&mut item.serialize());
 	}
 
 	fn deserialize<P, T: Deserialize<P>>(&mut self) -> Result<T, DeserializationError> {
@@ -266,7 +265,7 @@ impl Serializer for Binary {
 		key_deserialize(self, key, |x| { T::deserialize::<Self>(x) })
 	}
 
-	fn try_get_key(&mut self) -> Option<String> {
-		self.deserialize_string().ok()
+	fn try_get_key<K: FromStr>(&mut self) -> Option<K> {
+		self.deserialize_string().ok().map(|x| K::from_str(x.as_str()).ok()).flatten()
 	}
 }

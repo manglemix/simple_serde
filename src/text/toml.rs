@@ -1,5 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Write;
+use std::str::FromStr;
 
 use super::*;
 
@@ -292,7 +293,7 @@ impl<P, K: Borrow<str> + Eq + std::hash::Hash, V: Serialize<P>> TOMLSerialize<P>
 }
 
 
-impl<P, K: Eq + std::hash::Hash + From<String>, V: Deserialize<P>> TOMLDeserialize<P> for HashMap<K, V> {
+impl<E: Debug, P, K: Eq + std::hash::Hash + FromStr<Err=E>, V: Deserialize<P>> TOMLDeserialize<P> for HashMap<K, V> {
 	fn deserialize_toml(data: String) -> Result<Self, DeserializationError> {
 		Self::deserialize::<TextRepr>(&mut TextRepr::from_toml(data)?)
 	}

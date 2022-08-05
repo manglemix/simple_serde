@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
+use std::str::FromStr;
 
 use super::*;
 
@@ -16,16 +17,17 @@ impl<P, K, V> Serialize<P> for HashMap<K, V>
 }
 
 
-impl<P, K, V> Deserialize<P> for HashMap<K, V>
+impl<P, K, V, E> Deserialize<P> for HashMap<K, V>
 	where
-		K: Eq + Hash + From<String>,
+		E: Debug,
+		K: Eq + Hash + FromStr<Err=E>,
 		V: Deserialize<P>
 {
 	fn deserialize<T: Serializer>(data: &mut T) -> Result<Self, DeserializationError> {
 		let mut out = Self::new();
-		while let Some(key) = data.try_get_key() {
+		while let Some(key) = data.try_get_key::<String>() {
 			let deser = data.deserialize_key(key.as_str()).set_field(key.clone())?;
-			out.insert(K::from(key), deser);
+			out.insert(K::from_str(key.as_str()).map_err(|e| DeserializationError::new(key, DeserializationErrorKind::from_str_err(e)))?, deser);
 		}
 
 		Ok(out)

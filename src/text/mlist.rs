@@ -1,5 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Write;
+use std::str::FromStr;
 use crate::toml::{AVG_TOML_LINE_LENGTH, map_entries_recursive};
 
 use super::*;
@@ -90,7 +91,6 @@ impl TextRepr {
 					new_path.reverse();
 					out.push_entry_path(new_path, Self::Array(values.into()));
 					values = Vec::new();
-
 				}
 
 				outer_path.clear();
@@ -124,6 +124,12 @@ impl TextRepr {
 			}
 			value = value.trim().to_string();
 			values.push(Self::from_str_value(value)?);
+		}
+
+		if !values.is_empty() {
+			let mut new_path = outer_path.clone();
+			new_path.reverse();
+			out.push_entry_path(new_path, Self::Array(values.into()));
 		}
 
 		Ok(out)
@@ -238,7 +244,7 @@ impl<P, K: Borrow<str> + Eq + std::hash::Hash, V: Serialize<P>> MListSerialize<P
 }
 
 
-impl<P, K: Eq + std::hash::Hash + From<String>, V: Deserialize<P>> MListDeserialize<P> for HashMap<K, V> {
+impl<E: Debug, P, K: Eq + std::hash::Hash + FromStr<Err=E>, V: Deserialize<P>> MListDeserialize<P> for HashMap<K, V> {
 	fn deserialize_mlist(data: String) -> Result<Self, DeserializationError> {
 		Self::deserialize::<TextRepr>(&mut TextRepr::from_mlist(data)?)
 	}

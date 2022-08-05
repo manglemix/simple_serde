@@ -4,6 +4,7 @@ use std::mem::replace;
 
 pub use json::json_prelude;
 pub use toml::toml_prelude;
+pub use mlist::mlist_prelude;
 
 use super::*;
 
@@ -38,7 +39,7 @@ pub enum TextRepr {
 fn first_symbol(data: &mut VecDeque<char>) -> Option<char> {
 	while let Some(c) = data.pop_front() {
 		match c {
-			'\n' | ' ' | '\t' => {},
+			'\n' | ' ' | '\t' | '\r' => {},
 			c => return Some(c)
 		}
 	}
@@ -63,7 +64,7 @@ impl TextRepr {
 	pub fn pull_value(&mut self) -> Result<Self, DeserializationErrorKind> {
 		match self {
 			TextRepr::Array(x) => x.pop_front().ok_or(DeserializationErrorKind::UnexpectedEOF),
-			TextRepr::Table(_) => Err(DeserializationErrorKind::InvalidType { expected: "non-table", actual: "table" }),
+			// TextRepr::Table(_) => Err(DeserializationErrorKind::InvalidType { expected: "non-table", actual: "table" }),
 			_ => Ok(replace(self, Self::Empty))
 		}
 	}
@@ -262,9 +263,9 @@ impl Serializer for TextRepr {
 		result
 	}
 
-	fn try_get_key(&mut self) -> Option<String> {
+	fn try_get_key<K: FromStr>(&mut self) -> Option<K> {
 		match self {
-			Self::Table(x) => x.keys().next().cloned(),
+			Self::Table(x) => x.keys().next().map(|x| K::from_str(x.as_str()).ok()).flatten(),
 			_ => None
 		}
 	}
