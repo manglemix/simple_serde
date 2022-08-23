@@ -197,6 +197,15 @@ pub trait Serializer: PrimitiveSerializer + Debug {
 			_ => Err(e)
 		})
 	}
+	fn deserialize_key_opt<P, T: Deserialize<P>, K: Borrow<str>>(&mut self, key: K) -> Result<Option<T>, DeserializationError> {
+		match self.deserialize_key(key) {
+			Ok(x) => Ok(Some(x)),
+			Err(e) => match &e.kind {
+				DeserializationErrorKind::NoMatch { .. } => Ok(None),
+				_ => Err(e)
+			}
+		}
+	}
 	/// Try to get a key if it is the next item
 	fn try_get_key<K: FromStr>(&mut self) -> Option<K>;
 }

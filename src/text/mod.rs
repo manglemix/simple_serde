@@ -226,15 +226,6 @@ impl PrimitiveSerializer for TextRepr {
 	}
 }
 
-
-macro_rules! serialize_owned {
-    ($item: expr) => {{
-		let mut owner = TextRepr::new();
-		$item.serialize(&mut owner);
-		owner
-	}};
-}
-
 impl Serializer for TextRepr {
 	fn serialize<P, T: Serialize<P>>(&mut self, item: T) {
 		self.push_value(serialize_owned!(item));
