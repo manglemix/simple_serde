@@ -53,7 +53,10 @@ pub enum DeserializationErrorKind {
 	InvalidFormat {
 		reason: String
 	},
-	FromStrError(String)
+	FromStrError(String),
+	#[cfg(feature = "regex")]
+	/// An error only produced when a regex failed to parse
+	RegexParseError(regex::Error)
 }
 
 
@@ -175,13 +178,39 @@ pub trait PrimitiveSerializer {
 }
 
 
+impl<P, V: Deserialize<P>> Deserialize<P> for Option<V> {
+	#[warn(deprecated)]
+	fn deserialize<T: Serializer>(_: &mut T) -> Result<Self, DeserializationError> {
+		unimplemented!()
+	}
+
+	fn deserialize_key<T: Serializer>(data: &mut T, key: &str) -> Result<Self, DeserializationError> {
+		match data.deserialize_key_internal(key) {
+			Ok(x) => Ok(Some(x)),
+			Err(e) => match &e.kind {
+				DeserializationErrorKind::MissingField => Ok(None),
+				_ => Err(e)
+			}
+		}
+	}
+}
+
+
 /// A trait for data structures that can serialize or deserialize into other types that implement Serialize or Deserialize respectively
-pub trait Serializer: PrimitiveSerializer + Debug {
+pub trait Serializer: PrimitiveSerializer + Debug + Sized {
 	fn serialize<P, T: Serialize<P>>(&mut self, item: T);
 	fn serialize_key<P, T: Serialize<P>, K: Borrow<str>>(&mut self, key: K, item: T);
 	fn deserialize<P, T: Deserialize<P>>(&mut self) -> Result<T, DeserializationError>;
-	fn deserialize_key<P, T: Deserialize<P>, K: Borrow<str>>(&mut self, key: K) -> Result<T, DeserializationError>;
-	fn deserialize_key_or<P, T: Deserialize<P>, K: Borrow<str>, V: Into<T>>(&mut self, key: K, or: V) -> Result<T, DeserializationError> {
+	fn deserialize_key<P, T: Deserialize<P>, K: Borrow<str>>(&mut self, key: K) -> Result<T, DeserializationError> {
+		T::deserialize_key(self, key.borrow())
+	}
+	fn deserialize_key_internal<P, T: Deserialize<P>>(&mut self, key: &str) -> Result<T, DeserializationError>;
+	fn deserialize_key_or<P, T, K, V>(&mut self, key: K, or: V) -> Result<T, DeserializationError>
+		where
+			T: Deserialize<P>,
+			K: Borrow<str>,
+			V: Into<T>
+	{
 		self.deserialize_key(key).or_else(|e| match &e.kind {
 			DeserializationErrorKind::MissingField => Ok(or.into()),
 			_ => Err(e)
@@ -189,22 +218,14 @@ pub trait Serializer: PrimitiveSerializer + Debug {
 	}
 	fn deserialize_key_or_else<P, T, K, F>(&mut self, key: K, or: F) -> Result<T, DeserializationError>
 		where
-			T: Deserialize<P>, K: Borrow<str>,
+			T: Deserialize<P>,
+			K: Borrow<str>,
 			F: FnOnce() -> T
 	{
 		self.deserialize_key(key).or_else(|e| match &e.kind {
 			DeserializationErrorKind::MissingField => Ok(or()),
 			_ => Err(e)
 		})
-	}
-	fn deserialize_key_opt<P, T: Deserialize<P>, K: Borrow<str>>(&mut self, key: K) -> Result<Option<T>, DeserializationError> {
-		match self.deserialize_key(key) {
-			Ok(x) => Ok(Some(x)),
-			Err(e) => match &e.kind {
-				DeserializationErrorKind::NoMatch { .. } => Ok(None),
-				_ => Err(e)
-			}
-		}
 	}
 	/// Try to get a key if it is the next item
 	fn try_get_key<K: FromStr>(&mut self) -> Option<K>;
@@ -220,6 +241,14 @@ pub trait Serialize<ProfileMarker = NaturalProfile> {
 /// Allows the implementing type to be decoded from any type that implements ItemAccess
 pub trait Deserialize<ProfileMarker = NaturalProfile>: Sized {
 	fn deserialize<T: Serializer>(data: &mut T) -> Result<Self, DeserializationError>;
+	/// Deserialize self from data using a key
+	///
+	/// Implementors must be extremely careful when calling data.deserialize_key inside here
+	/// as data.deserialize_key will call this method, resulting in infinite recursion.
+	/// data.deserialize_key_internal will not call this method
+	fn deserialize_key<T: Serializer>(data: &mut T, key: &str) -> Result<Self, DeserializationError> {
+		data.deserialize_key_internal(key)
+	}
 }
 
 
@@ -263,6 +292,13 @@ pub struct EfficientProfile;
 impl<P, S: Serialize<P>> Serialize<P> for Box<S> {
 	fn serialize<T: Serializer>(self, data: &mut T) {
 		data.serialize(*self);
+	}
+}
+
+
+impl<P, S: Deserialize<P>> Deserialize<P> for Box<S> {
+	fn deserialize<T: Serializer>(data: &mut T) -> Result<Self, DeserializationError> {
+		data.deserialize().map(Box::new)
 	}
 }
 
@@ -330,6 +366,11 @@ mod tests {
 		one: &'a TestStruct
 	}
 
+	#[derive(Debug)]
+	struct TestStruct4 {
+		arr: Vec<String>
+	}
+
 	impl_key_serde!(TestStruct, ReadableProfile, name, id, age);
 
 	impl Serialize<EfficientProfile> for TestStruct {
@@ -385,6 +426,20 @@ mod tests {
 		}
 	}
 
+	impl Serialize<ReadableProfile> for TestStruct4 {
+		fn serialize<T: Serializer>(self, data: &mut T) {
+			data.serialize_key("arr", self.arr);
+		}
+	}
+
+	impl Deserialize<ReadableProfile> for TestStruct4 {
+		fn deserialize<T: Serializer>(data: &mut T) -> Result<Self, DeserializationError> {
+			Ok(Self {
+				arr: data.deserialize_key("arr")?,
+			})
+		}
+	}
+
 	#[cfg(feature = "text")]
 	impl_toml!(TestStruct, ReadableProfile);
 	#[cfg(feature = "text")]
@@ -397,6 +452,8 @@ mod tests {
 	impl_bin!(TestStruct2, ReadableProfile);
 	#[cfg(feature = "text")]
 	impl_json!(TestStruct2, ReadableProfile);
+	#[cfg(feature = "text")]
+	impl_toml!(TestStruct4, ReadableProfile);
 
 	#[cfg(feature = "text")]
 	#[test]
@@ -505,5 +562,16 @@ mod tests {
 		// name = \"lmf\"".to_string();
 		println!("{}", ser);
 		println!("{:?}", TestStruct::deserialize_json(ser).unwrap());
+	}
+
+	#[cfg(feature = "text")]
+	#[test]
+	fn test_serde_6() {
+		let test = TestStruct4 {
+			arr: vec!["fw".into(), "ab".into()]
+		};
+		let ser = test.serialize_toml();
+		println!("{}", ser);
+		println!("{:?}", TestStruct4::deserialize_toml(ser).unwrap());
 	}
 }

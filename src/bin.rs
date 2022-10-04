@@ -186,12 +186,11 @@ fn find_key<K: Borrow<str>>(bytes: &[u8], key: K) -> Option<usize> {
 // }
 
 /// Deserialize a type, using the given fn, at the given key
-fn key_deserialize<T, K, F>(bytes: &mut Binary, key: K, f: F) -> Result<T, DeserializationError>
+fn key_deserialize<T, F>(bytes: &mut Binary, key: &str, f: F) -> Result<T, DeserializationError>
 	where
-		K: Borrow<str>,
 		F: Fn(&mut Binary) -> Result<T, DeserializationError>
 {
-	let key = key.borrow().to_string();
+	let key = key.to_string();
 	let idx = find_key(bytes.make_contiguous(), key.clone()).ok_or_else(|| DeserializationError::missing_field(key.clone()))?;
 	let mut last = bytes.drain(idx..).collect();
 	let item = (f)(&mut last).map_err(|e| { DeserializationError::nest(e).set_field(key) })?;
@@ -261,7 +260,7 @@ impl Serializer for Binary {
 		T::deserialize::<Self>(self)
 	}
 
-	fn deserialize_key<P, T: Deserialize<P>, K: Borrow<str>>(&mut self, key: K) -> Result<T, DeserializationError> {
+	fn deserialize_key_internal<P, T: Deserialize<P>>(&mut self, key: &str) -> Result<T, DeserializationError> {
 		key_deserialize(self, key, |x| { T::deserialize::<Self>(x) })
 	}
 

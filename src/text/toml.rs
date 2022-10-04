@@ -50,8 +50,13 @@ pub(crate) fn delimit_comma_split(data: &str) -> Vec<String> {
 		} else if !in_string && c == ',' {
 			out.push(item.clone());
 			item.clear();
+			continue
 		}
 		item.push(c);
+	}
+
+	if !item.is_empty() {
+		out.push(item);
 	}
 
 	out
@@ -96,7 +101,7 @@ impl TextRepr {
 				out.shrink_to_fit();
 				out
 			}
-			TextRepr::Array(x) => {
+			TextRepr::Array(mut x) => {
 				debug_assert!(!{
 					fn contains_table(arr: &VecDeque<TextRepr>) -> bool {
 						for item in arr {
@@ -111,10 +116,20 @@ impl TextRepr {
 
 					contains_table(&x)
 				});
-				format!(
-					"{:?}",
-					x.into_iter().map(Self::to_toml).collect::<Vec<_>>()
-				)
+
+				let mut out = String::new();
+
+				match x.pop_front() {
+					Some(item) => out += item.to_toml().as_str(),
+					None => return "[]".to_string()
+				};
+
+				for item in x {
+					out += ", ";
+					out += item.to_toml().as_str();
+				}
+
+				format!("[{out}]")
 			}
 		}
 	}

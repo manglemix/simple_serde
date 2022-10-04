@@ -249,3 +249,17 @@ impl<E: Debug, P, K: Eq + std::hash::Hash + FromStr<Err=E>, V: Deserialize<P>> M
 		Self::deserialize::<TextRepr>(&mut TextRepr::from_mlist(data)?)
 	}
 }
+
+
+impl<P, V: Serialize<P>> MListSerialize<P> for Vec<V> {
+	fn serialize_mlist(self) -> String {
+		TextRepr::to_mlist(serialize_owned!(self))
+	}
+}
+
+
+impl<P, V: Deserialize<P>> MListDeserialize<P> for Vec<V> {
+	fn deserialize_mlist(data: String) -> Result<Self, DeserializationError> {
+		Self::deserialize::<TextRepr>(&mut TextRepr::from_mlist(data)?)
+	}
+}

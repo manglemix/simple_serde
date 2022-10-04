@@ -11,6 +11,8 @@ use super::*;
 pub mod toml;
 pub mod json;
 pub mod mlist;
+#[cfg(feature = "regex")]
+mod regex;
 
 
 macro_rules! serialize_owned {
@@ -244,8 +246,8 @@ impl Serializer for TextRepr {
 		result
 	}
 
-	fn deserialize_key<P, T: Deserialize<P>, K: Borrow<str>>(&mut self, key: K) -> Result<T, DeserializationError> {
-		let key: String = key.borrow().into();
+	fn deserialize_key_internal<P, T: Deserialize<P>>(&mut self, key: &str) -> Result<T, DeserializationError> {
+		let key = key.to_string();
 		let mut value = self.pull_entry(key.clone()).set_field(key.clone())?;
 		let result = T::deserialize(&mut value).map_err(|e| { e.nest().set_field(key.clone()) });
 		if !value.is_empty() {
