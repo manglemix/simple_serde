@@ -1,3 +1,4 @@
+#[cfg(feature = "bin")]
 use std::collections::VecDeque;
 
 use crate::text::TextRepr;
